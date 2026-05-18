@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 import { supabase } from './supabaseClient';
 import { DriverSession, DailyCode, JobType, SignJob } from '../data/SignJob';
 
@@ -21,8 +22,67 @@ type JobRow = {
   photo_timestamp: string | null;
 };
 
+// Shape returned by the validate_route_code() RPC (see 006_rate_limit_codes.sql).
+type ValidateRouteCodePayload = {
+  id: string;
+  code: string;
+  driver_slot: number;
+  jobs: JobRow[];
+};
+
+const CLIENT_ID_KEY = 'driver_client_id';
+
+// Cryptographically secure 6-digit code generator. Math.random() is biased
+// and predictable across modern V8 with enough samples — fatal when the
+// generated value IS the driver credential. crypto.getRandomValues is
+// available globally in both Hermes (RN 0.76+) and the Electron renderer.
 function generateSixDigitCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    throw new Error('Cryptographic RNG unavailable — cannot generate driver codes safely.');
+  }
+  // Reject values outside the largest multiple of 900000 that fits in Uint32
+  // so the modulo is unbiased.
+  const LIMIT = Math.floor(0xffffffff / 900000) * 900000;
+  const buf = new Uint32Array(1);
+  let v: number;
+  do {
+    crypto.getRandomValues(buf);
+    v = buf[0];
+  } while (v >= LIMIT);
+  return (100000 + (v % 900000)).toString();
+}
+
+// Stable per-install identifier used to rate-limit code validation attempts
+// in the RPC. Persisted in the device keychain — does not leak across reinstalls.
+async function getOrCreateClientId(): Promise<string> {
+  const existing = await SecureStore.getItemAsync(CLIENT_ID_KEY);
+  if (existing) return existing;
+  if (typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function') {
+    throw new Error('crypto.randomUUID unavailable — cannot create client id.');
+  }
+  const id = crypto.randomUUID();
+  await SecureStore.setItemAsync(CLIENT_ID_KEY, id);
+  return id;
+}
+
+function mapJobRow(j: JobRow): SignJob {
+  return {
+    id: j.id,
+    clientName: j.client_name,
+    agentName: j.agent_name ?? '',
+    agentEmail: j.agent_email ?? '',
+    address: j.address,
+    signDescription: j.sign_description,
+    jobType: (j.job_type === 'removal' ? 'removal' : 'install') as JobType,
+    latitude: j.latitude,
+    longitude: j.longitude,
+    sortOrder: j.sort_order,
+    isComplete: j.is_complete,
+    photoKey: j.photo_key ?? undefined,
+    photoGPSLat: j.photo_gps_lat ?? undefined,
+    photoGPSLng: j.photo_gps_lng ?? undefined,
+    photoTimestamp: j.photo_timestamp ? new Date(j.photo_timestamp) : undefined,
+  };
 }
 
 function expiryNextMorning(): string {
@@ -37,68 +97,38 @@ function expiryNextMorning(): string {
 }
 
 export const RouteCodeService = {
-  // Driver: load session from a 6-digit code (anon key + RLS).
+  // Driver: load session from a 6-digit code via the rate-limited RPC.
   // Returns null when the code is invalid or expired.
-  // Throws when there is a network or server problem — callers should distinguish these.
+  // Throws when there is a network/server problem OR when the caller is rate-limited
+  // (P0005). Callers should surface the thrown message verbatim — it includes
+  // the wait-and-retry instruction for the rate-limited case.
   async loadSession(code: string): Promise<DriverSession | null> {
-    const { data, error } = await supabase
-      .from('route_codes')
-      .select(`
-        id,
-        code,
-        driver_slot,
-        expires_at,
-        is_active,
-        jobs (
-          id,
-          client_name,
-          agent_name,
-          agent_email,
-          address,
-          sign_description,
-          job_type,
-          latitude,
-          longitude,
-          sort_order,
-          is_complete,
-          photo_key,
-          photo_gps_lat,
-          photo_gps_lng,
-          photo_timestamp
-        )
-      `)
-      .eq('code', code)
-      .eq('is_active', true)
-      .gt('expires_at', new Date().toISOString())
-      .single();
+    const clientId = await getOrCreateClientId();
+
+    const { data, error } = await supabase.rpc('validate_route_code', {
+      p_code: code,
+      p_client_id: clientId,
+    });
 
     if (error) {
-      // PGRST116 = no rows — code is invalid or expired, not a network failure
-      if (error.code === 'PGRST116') return null;
+      if (error.code === 'P0005') {
+        throw new Error('Too many attempts. Wait a minute and try again.');
+      }
       throw new Error(error.message);
     }
-    if (!data) return null;
+
+    if (data === null || data === undefined) return null;
+
+    // Narrow the RPC payload — `data` from supabase.rpc is typed as unknown.
+    const payload = data as ValidateRouteCodePayload;
+    if (!payload || typeof payload !== 'object' || !Array.isArray(payload.jobs)) {
+      throw new Error('Unexpected response from server while loading route.');
+    }
 
     return {
-      routeCode: data.code,
-      driverSlot: data.driver_slot,
-      jobs: (data.jobs as JobRow[]).map((j) => ({
-        id: j.id,
-        clientName: j.client_name,
-        agentName: j.agent_name ?? '',
-        agentEmail: j.agent_email ?? '',
-        address: j.address,
-        signDescription: j.sign_description,
-        jobType: (j.job_type === 'removal' ? 'removal' : 'install') as JobType,
-        latitude: j.latitude,
-        longitude: j.longitude,
-        sortOrder: j.sort_order,
-        isComplete: j.is_complete,
-        photoKey: j.photo_key ?? undefined,
-        photoGPSLat: j.photo_gps_lat ?? undefined,
-        photoGPSLng: j.photo_gps_lng ?? undefined,
-        photoTimestamp: j.photo_timestamp ? new Date(j.photo_timestamp) : undefined,
-      })),
+      routeCode: payload.code,
+      driverSlot: payload.driver_slot,
+      jobs: payload.jobs.map(mapJobRow),
     };
   },
 
@@ -173,23 +203,7 @@ export const RouteCodeService = {
 
     if (error) throw new Error(error.message);
 
-    return (data ?? []).map((j: JobRow) => ({
-      id: j.id,
-      clientName: j.client_name,
-      agentName: j.agent_name ?? '',
-      agentEmail: j.agent_email ?? '',
-      address: j.address,
-      signDescription: j.sign_description,
-      jobType: (j.job_type === 'removal' ? 'removal' : 'install') as JobType,
-      latitude: j.latitude,
-      longitude: j.longitude,
-      sortOrder: j.sort_order,
-      isComplete: j.is_complete,
-      photoKey: j.photo_key ?? undefined,
-      photoGPSLat: j.photo_gps_lat ?? undefined,
-      photoGPSLng: j.photo_gps_lng ?? undefined,
-      photoTimestamp: j.photo_timestamp ? new Date(j.photo_timestamp) : undefined,
-    }));
+    return ((data ?? []) as JobRow[]).map(mapJobRow);
   },
 
   // Admin: fetch today's active codes for the dashboard

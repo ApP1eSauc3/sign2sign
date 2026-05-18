@@ -27,8 +27,8 @@ interface DriverSessionStore {
   // Step 2a: Driver confirms — request GPS and upload
   confirmAndUpload: (jobId: string, location: PhotoLocation) => Promise<void>;
 
-  // Step 2b: Driver retakes — reset to idle
-  retakePhoto: (jobId: string) => void;
+  // Step 2b: Driver retakes — reset to idle (awaits offline-queue clear)
+  retakePhoto: (jobId: string) => Promise<void>;
 
   // Step 2c: Location permission denied — surface a clear retry prompt
   handleLocationDenied: (jobId: string) => void;
@@ -83,11 +83,16 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
       get().flushOfflineQueue();
 
       return true;
-    } catch {
-      // RouteCodeService.loadSession throws on network/server errors (not on invalid code)
+    } catch (err) {
+      // RouteCodeService.loadSession throws on network/server errors (not on invalid code).
+      // Surface the rate-limit message verbatim — it tells the driver how long to wait.
+      const message = err instanceof Error ? err.message : '';
+      const isRateLimited = message.startsWith('Too many attempts');
       set({
         isLoadingSession: false,
-        codeError: 'Connection problem — check your signal and try again.',
+        codeError: isRateLimited
+          ? message
+          : 'Connection problem — check your signal and try again.',
       });
       return false;
     }
@@ -139,6 +144,9 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
   confirmAndUpload: async (jobId, location) => {
     const state = get().uploadStates[jobId];
     if (state?.status !== 'preview') return;
+    const session = get().session;
+    if (!session) return;
+    const routeCode = session.routeCode;
 
     const { imageUri } = state;
     const { setUploadState } = get();
@@ -152,6 +160,7 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
           jobId,
           imageUri,
           location,
+          routeCode,
           queuedAt: Date.now(),
         });
         setUploadState(jobId, {
@@ -161,7 +170,7 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
         return;
       }
 
-      const result = await JobPhotoService.uploadPhoto(jobId, imageUri, location);
+      const result = await JobPhotoService.uploadPhoto(jobId, imageUri, location, routeCode);
       setUploadState(jobId, { status: 'succeeded', photoKey: result.photoKey });
 
       // Update local session state with photo data
@@ -194,10 +203,11 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
 
   // --- Step 2b: Retake — discard preview and restart ---
 
-  retakePhoto: (jobId) => {
-    // Also clear any queued upload for this job — prevents the old photo uploading
-    // on reconnect after the driver retakes and uploads a new one.
-    void OfflineQueueService.remove(jobId, 'upload');
+  retakePhoto: async (jobId) => {
+    // Clear any queued upload BEFORE flipping state. If we voided the remove
+    // and the offline queue flushed concurrently, the stale photo could still
+    // upload after the driver started a retake.
+    await OfflineQueueService.remove(jobId, 'upload');
     get().setUploadState(jobId, { status: 'idle' });
   },
 
@@ -214,14 +224,17 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
   // --- Step 3: Mark complete — only callable when canMarkComplete is true ---
 
   markComplete: async (jobId) => {
-    const { canMarkComplete } = get();
+    const { canMarkComplete, session } = get();
     if (!canMarkComplete(jobId)) return false;
+    // canMarkComplete only checks uploadStates, not session. A clearSession()
+    // racing with this call would otherwise crash on the non-null assertion.
+    if (!session) return false;
 
     // Clear any previous mark-complete error for this job before attempting
     set((s) => ({ markCompleteErrors: { ...s.markCompleteErrors, [jobId]: '' } }));
 
     try {
-      const routeCode = get().session!.routeCode;
+      const routeCode = session.routeCode;
       const isOnline = await OfflineQueueService.isOnline();
       if (!isOnline) {
         await OfflineQueueService.enqueue({ type: 'markComplete', jobId, routeCode, queuedAt: Date.now() });
@@ -240,7 +253,7 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
         return true; // queued counts as success from the driver's perspective
       }
 
-      await JobPhotoService.markJobComplete(jobId, get().session!.routeCode);
+      await JobPhotoService.markJobComplete(jobId, routeCode);
 
       set((s) => {
         if (!s.session) return s;
@@ -275,7 +288,7 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
       onUpload: async (op) => {
         setUploadState(op.jobId, { status: 'uploading' });
         try {
-          const result = await JobPhotoService.uploadPhoto(op.jobId, op.imageUri, op.location);
+          const result = await JobPhotoService.uploadPhoto(op.jobId, op.imageUri, op.location, op.routeCode);
           setUploadState(op.jobId, { status: 'succeeded', photoKey: result.photoKey });
         } catch (err: unknown) {
           // Let the queue service know this op failed (it re-queues for next flush).

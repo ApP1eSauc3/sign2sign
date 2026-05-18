@@ -10,6 +10,7 @@ export type QueuedOperation =
       jobId: string;
       imageUri: string;
       location: PhotoLocation;
+      routeCode: string;  // needed by uploadPhoto's recover_existing_photo RPC
       queuedAt: number;
     }
   | {
