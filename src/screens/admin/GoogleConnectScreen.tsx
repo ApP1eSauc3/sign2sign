@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AdminStackParamList } from '../../navigation/AdminStack';
@@ -15,6 +14,8 @@ import { GoogleAuthService } from '../../services/GoogleAuthService';
 import { colors } from '../../utils/colors';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'GoogleConnect'>;
+
+const isElectron = typeof window !== 'undefined' && !!window.electron;
 
 export default function GoogleConnectScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -27,11 +28,18 @@ export default function GoogleConnectScreen({ navigation }: Props) {
     scopes: GoogleAuthService.SCOPES,
   });
 
+  // ── Native / web (non-Electron) OAuth response ─────────────────────────────
   useEffect(() => {
     if (response?.type === 'success') {
       const { code } = response.params;
-      // redirectUri must match what was sent in the auth request
-      const redirectUri = AuthSession.makeRedirectUri({ scheme: 'sign2sign', path: 'oauth' });
+      // Use the exact redirect URI the auth request was built with.
+      // Google rejects the token exchange with redirect_uri_mismatch if this
+      // differs by even a trailing slash from the one used in the authorize call.
+      const redirectUri = request?.redirectUri;
+      if (!redirectUri) {
+        setError('OAuth request not ready — try again.');
+        return;
+      }
       setIsConnecting(true);
       setError(null);
       (async () => {
@@ -48,6 +56,41 @@ export default function GoogleConnectScreen({ navigation }: Props) {
       setError(response.error?.message ?? 'Authentication failed');
     }
   }, [response]);
+
+  // ── Electron OAuth response ────────────────────────────────────────────────
+  // On Electron, the system browser redirects to sign2sign://oauth?code=...
+  // main.js catches the protocol URL and forwards it here via IPC.
+  useEffect(() => {
+    if (!isElectron || !window.electron) return;
+    return window.electron.onOAuthCallback((url: string) => {
+      const parsed = new URL(url);
+      const code = parsed.searchParams.get('code');
+      if (!code) {
+        setError('No authorisation code received from Google.');
+        return;
+      }
+      // Use the exact redirect URI the auth request was built with.
+      // Google rejects the token exchange with redirect_uri_mismatch if this
+      // differs by even a trailing slash from the one used in the authorize call.
+      const redirectUri = request?.redirectUri;
+      if (!redirectUri) {
+        setError('OAuth request not ready — try again.');
+        return;
+      }
+      setIsConnecting(true);
+      setError(null);
+      (async () => {
+        try {
+          await GoogleAuthService.exchangeCodeForTokens(code, redirectUri, request?.codeVerifier);
+          navigation.goBack();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Authentication failed');
+        } finally {
+          setIsConnecting(false);
+        }
+      })();
+    });
+  }, [request?.codeVerifier]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -83,7 +126,16 @@ export default function GoogleConnectScreen({ navigation }: Props) {
 
         <TouchableOpacity
           style={[styles.button, (!request || isConnecting) && styles.buttonDisabled]}
-          onPress={() => promptAsync()}
+          onPress={() => {
+            // On Electron, popup windows are intercepted and opened in the system
+            // browser by main.js's setWindowOpenHandler. promptAsync() would open a
+            // popup that never resolves, so we open the auth URL directly instead.
+            if (isElectron && request?.url && window.electron) {
+              void window.electron.openExternal(request.url);
+            } else {
+              void promptAsync();
+            }
+          }}
           disabled={!request || isConnecting}
           activeOpacity={0.85}
         >
