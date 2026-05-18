@@ -61,10 +61,13 @@ export const JobPhotoService = {
 
   // Upload photo to Supabase Storage and update the job record.
   // GPS location is passed in by the store at call time — not read here.
+  // routeCode is required for the P0002 recovery RPC which validates the
+  // calling code owns the target job (anon no longer has direct SELECT on jobs).
   async uploadPhoto(
     jobId: string,
     imageUri: string,
-    currentLocation: PhotoLocation
+    currentLocation: PhotoLocation,
+    routeCode: string
   ): Promise<PhotoUploadResult> {
     const timestamp = new Date();
     const ext = imageUri.split('.').pop() ?? 'jpg';
@@ -97,18 +100,27 @@ export const JobPhotoService = {
       // The photo is already on record — fetch the canonical key and return success
       // rather than surfacing a spurious error to the driver.
       if (updateError.code === 'P0002') {
-        const { data: existing } = await supabase
-          .from('jobs')
-          .select('photo_key, photo_gps_lat, photo_gps_lng, photo_timestamp')
-          .eq('id', jobId)
-          .single();
-        if (existing?.photo_key) {
-          return {
-            photoKey: existing.photo_key,
-            latitude: existing.photo_gps_lat ?? currentLocation.latitude,
-            longitude: existing.photo_gps_lng ?? currentLocation.longitude,
-            timestamp: existing.photo_timestamp ? new Date(existing.photo_timestamp) : timestamp,
+        // Anon has no direct SELECT on jobs — go through the recovery RPC
+        // which validates that this route code owns the target job.
+        const { data: recovered } = await supabase.rpc('recover_existing_photo', {
+          p_job_id: jobId,
+          p_route_code: routeCode,
+        });
+        if (recovered && typeof recovered === 'object') {
+          const r = recovered as {
+            photo_key?: string;
+            photo_gps_lat?: number | null;
+            photo_gps_lng?: number | null;
+            photo_timestamp?: string | null;
           };
+          if (typeof r.photo_key === 'string') {
+            return {
+              photoKey: r.photo_key,
+              latitude: r.photo_gps_lat ?? currentLocation.latitude,
+              longitude: r.photo_gps_lng ?? currentLocation.longitude,
+              timestamp: r.photo_timestamp ? new Date(r.photo_timestamp) : timestamp,
+            };
+          }
         }
       }
       throw new Error(updateError.message);
@@ -141,7 +153,12 @@ export const JobPhotoService = {
 
     if (error) throw new Error(error.message);
 
-    const result = data as { ok?: boolean; error?: string; already_complete?: boolean };
-    if (result?.error) throw new Error(result.error);
+    // Narrow the RPC payload at the boundary — `data` is typed as unknown.
+    if (data !== null && typeof data === 'object') {
+      const result = data as { ok?: boolean; error?: string; already_complete?: boolean };
+      if (typeof result.error === 'string' && result.error.length > 0) {
+        throw new Error(result.error);
+      }
+    }
   },
 };
