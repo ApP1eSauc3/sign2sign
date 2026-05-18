@@ -38,6 +38,14 @@ export default function AdminDashboardScreen({ navigation }: Props) {
   const [loadCodesError, setLoadCodesError] = useState<string | null>(null);
 
   const [sheetId, setSheetId] = useState('');
+  const [sheetName, setSheetName] = useState('');
+  const [importDate, setImportDate] = useState(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  });
   const [selectedRouteCodeId, setSelectedRouteCodeId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
@@ -101,18 +109,44 @@ export default function AdminDashboardScreen({ navigation }: Props) {
       Alert.alert('Sheet ID required', 'Paste the Google Sheet ID to import.');
       return;
     }
+    if (!sheetName.trim()) {
+      Alert.alert('Tab name required', 'Enter the sheet tab name (e.g. Sheet44).');
+      return;
+    }
     if (!selectedRouteCodeId) {
       Alert.alert('Select a driver', 'Tap a driver code below to assign jobs to them.');
+      return;
+    }
+
+    // Validate YYYY-MM-DD strictly. Without this, "2026-13-40" rolls over to
+    // a valid Date object that silently matches zero rows and the user just
+    // sees "No jobs found" with no hint that the date itself was malformed.
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(importDate);
+    if (!match) {
+      Alert.alert('Invalid date', 'Use the format YYYY-MM-DD (e.g. 2026-05-17).');
+      return;
+    }
+    const y = Number(match[1]);
+    const m = Number(match[2]);
+    const d = Number(match[3]);
+    const dateObj = new Date(y, m - 1, d);
+    if (
+      dateObj.getFullYear() !== y ||
+      dateObj.getMonth() !== m - 1 ||
+      dateObj.getDate() !== d
+    ) {
+      Alert.alert('Invalid date', 'That date does not exist — check month and day.');
       return;
     }
 
     setIsImporting(true);
     setImportResult(null);
     try {
-      const jobs = await GoogleSheetsService.importJobs(sheetId.trim());
+      const jobs = await GoogleSheetsService.importJobs(sheetId.trim(), sheetName.trim(), dateObj);
       await GoogleSheetsService.saveJobsToRoute(jobs, selectedRouteCodeId);
-      setImportResult(`✓ ${jobs.length} jobs imported successfully.`);
+      setImportResult(`✓ ${jobs.length} jobs imported for ${importDate}.`);
       setSheetId('');
+      setSheetName('');
       setSelectedRouteCodeId(null);
     } catch (e: unknown) {
       setImportResult(`✗ ${e instanceof Error ? e.message : 'Import failed.'}`);
@@ -246,19 +280,38 @@ export default function AdminDashboardScreen({ navigation }: Props) {
             autoCapitalize="none"
             autoCorrect={false}
           />
+          <Text style={styles.fieldLabel}>Sheet Tab Name</Text>
+          <TextInput
+            style={styles.input}
+            value={sheetName}
+            onChangeText={setSheetName}
+            placeholder="Sheet44"
+            placeholderTextColor={colors.adminTextTertiary}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.fieldLabel}>Import Date</Text>
+          <TextInput
+            style={styles.input}
+            value={importDate}
+            onChangeText={setImportDate}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.adminTextTertiary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="numeric"
+          />
           <View style={styles.sheetFormatCard}>
-            <Text style={styles.sheetFormatTitle}>REQUIRED COLUMN ORDER (row 2 onwards)</Text>
-            <Text style={styles.sheetFormatRow}>A  Client Name</Text>
-            <Text style={styles.sheetFormatRow}>B  Agent Name</Text>
-            <Text style={styles.sheetFormatRow}>C  Agent Email</Text>
-            <Text style={styles.sheetFormatRow}>D  Address</Text>
-            <Text style={styles.sheetFormatRow}>E  Sign Description</Text>
-            <Text style={styles.sheetFormatRow}>F  Job Type  <Text style={styles.sheetFormatHint}>(install or removal)</Text></Text>
-            <Text style={styles.sheetFormatRow}>G  Latitude</Text>
-            <Text style={styles.sheetFormatRow}>H  Longitude</Text>
-            <Text style={styles.sheetFormatRow}>I  Sort Order  <Text style={styles.sheetFormatHint}>(1, 2, 3…)</Text></Text>
+            <Text style={styles.sheetFormatTitle}>EXPECTED COLUMN ORDER (row 2 onwards)</Text>
+            <Text style={styles.sheetFormatRow}>A  Date</Text>
+            <Text style={styles.sheetFormatRow}>B  Agency  <Text style={styles.sheetFormatHint}>(client name)</Text></Text>
+            <Text style={styles.sheetFormatRow}>C  Agent  <Text style={styles.sheetFormatHint}>(name)</Text></Text>
+            <Text style={styles.sheetFormatRow}>D  Notes  <Text style={styles.sheetFormatHint}>(install instructions, optional)</Text></Text>
+            <Text style={styles.sheetFormatRow}>E  Size  <Text style={styles.sheetFormatHint}>(6x4, 4x3, etc., optional)</Text></Text>
+            <Text style={styles.sheetFormatRow}>F  Printed  <Text style={styles.sheetFormatHint}>(skipped)</Text></Text>
+            <Text style={styles.sheetFormatRow}>G  Address  <Text style={styles.sheetFormatHint}>(required — geocoded on import)</Text></Text>
             <Text style={styles.sheetFormatNote}>
-              Row 1 is treated as a header and skipped. Re-importing replaces all existing jobs for the selected driver.
+              Only rows matching the import date are imported. Addresses are geocoded automatically — requires EXPO_PUBLIC_GOOGLE_MAPS_API_KEY. Agent email is left blank; add it via the route detail screen before sending completion emails.
             </Text>
           </View>
 
@@ -290,11 +343,11 @@ export default function AdminDashboardScreen({ navigation }: Props) {
           <TouchableOpacity
             style={[
               styles.importButton,
-              (!sheetId.trim() || !selectedRouteCodeId || isImporting) &&
+              (!sheetId.trim() || !sheetName.trim() || !selectedRouteCodeId || isImporting) &&
                 styles.importButtonDisabled,
             ]}
             onPress={handleImportJobs}
-            disabled={!sheetId.trim() || !selectedRouteCodeId || isImporting}
+            disabled={!sheetId.trim() || !sheetName.trim() || !selectedRouteCodeId || isImporting}
           >
             {isImporting ? (
               <ActivityIndicator color={colors.white} />

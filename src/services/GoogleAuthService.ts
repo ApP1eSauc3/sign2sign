@@ -3,8 +3,15 @@ import * as WebBrowser from 'expo-web-browser';
 import * as SecureStore from 'expo-secure-store';
 
 // Required: create a project at console.cloud.google.com, enable the Sheets API,
-// and create OAuth2 credentials. Paste the resulting client IDs below.
-// For iOS: create an "iOS" credential. For web/Electron: create a "Web" credential.
+// and create OAuth2 credentials.
+//
+// CRITICAL — credential type for Electron:
+//   Use a "Desktop app" (a.k.a. "Native") credential, NOT a "Web application"
+//   one. Web credentials require client_secret on both /token exchange and
+//   /token refresh, and we cannot ship a secret in a public client. With a
+//   Desktop credential + PKCE (which expo-auth-session/providers/google
+//   uses by default), neither call needs a secret and refresh works as below.
+//   "iOS" credentials are similarly secret-less and correct for native iOS.
 const GOOGLE_CLIENT_ID_IOS = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS ?? '';
 const GOOGLE_CLIENT_ID_WEB = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB ?? '';
 
