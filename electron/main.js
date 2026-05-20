@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, ipcMain, session } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain, session, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -9,6 +9,7 @@ const fs = require('fs');
 const WEB_BUILD_PATH = path.join(__dirname, '..', 'dist');
 const DEV_SERVER_URL = 'http://localhost:8081';
 const STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
+const SECURE_FILE = path.join(app.getPath('userData'), 'secure-store.json');
 
 const isDev = !app.isPackaged;
 
@@ -97,8 +98,28 @@ function createWindow() {
   // This also routes the Google OAuth popup to the system browser so the
   // protocol redirect (sign2sign://) can complete correctly.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://localhost'))) {
+      shell.openExternal(url);
+    }
     return { action: 'deny' };
+  });
+
+  // Lock navigation to the app's own origin. Without this, an XSS or a
+  // malicious link could navigate the main window to a remote page that then
+  // runs with the app's (privileged) context. In-app routes are file:// in
+  // production and the dev server in development; anything else is opened in
+  // the system browser instead.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const inApp = url.startsWith('file://') || url.startsWith(DEV_SERVER_URL);
+    if (!inApp) {
+      event.preventDefault();
+      if (url.startsWith('https://')) shell.openExternal(url);
+    }
+  });
+
+  // This is a single-window admin tool — never attach <webview> tags.
+  mainWindow.webContents.on('will-attach-webview', (event) => {
+    event.preventDefault();
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -147,6 +168,53 @@ ipcMain.handle('open-external', (_, url) => {
   }
 });
 
+// ─── Encrypted secure storage (safeStorage) ─────────────────────────────────
+// Backs the renderer's secureStorage util on Electron. Values are encrypted
+// with the OS keychain (Keychain on macOS, DPAPI on Windows, libsecret on
+// Linux) and persisted as base64 in a JSON file under userData. This keeps
+// the Supabase admin session and Google OAuth tokens out of plaintext.
+
+function readSecureStore() {
+  try {
+    return JSON.parse(fs.readFileSync(SECURE_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeSecureStore(store) {
+  fs.writeFileSync(SECURE_FILE, JSON.stringify(store), { encoding: 'utf8', mode: 0o600 });
+}
+
+ipcMain.handle('secure-get', (_, key) => {
+  if (typeof key !== 'string') return null;
+  const store = readSecureStore();
+  const encoded = store[key];
+  if (typeof encoded !== 'string') return null;
+  try {
+    return safeStorage.decryptString(Buffer.from(encoded, 'base64'));
+  } catch {
+    return null; // key rotated / corrupt — treat as absent
+  }
+});
+
+ipcMain.handle('secure-set', (_, key, value) => {
+  if (typeof key !== 'string' || typeof value !== 'string') return;
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('OS encryption unavailable — refusing to store secrets in plaintext.');
+  }
+  const store = readSecureStore();
+  store[key] = safeStorage.encryptString(value).toString('base64');
+  writeSecureStore(store);
+});
+
+ipcMain.handle('secure-delete', (_, key) => {
+  if (typeof key !== 'string') return;
+  const store = readSecureStore();
+  delete store[key];
+  writeSecureStore(store);
+});
+
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
@@ -173,7 +241,8 @@ app.whenReady().then(() => {
             `script-src ${scriptSrc}`,
             "style-src 'self' 'unsafe-inline'",
             `connect-src ${connectSrc}`,
-            "img-src 'self' data: blob: https:",
+            // Photos load as signed URLs from Supabase storage only.
+            "img-src 'self' data: blob: https://*.supabase.co",
             "font-src 'self' data:",
             "object-src 'none'",
             "base-uri 'self'",
@@ -182,6 +251,14 @@ app.whenReady().then(() => {
         ],
       },
     });
+  });
+
+  // Deny every device-permission request (camera, mic, geolocation, etc.).
+  // The admin web build needs none — those flows live in the native mobile
+  // app. Denying by default removes a class of abuse if the renderer is
+  // ever compromised.
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
+    callback(false);
   });
 
   // ── App menu ───────────────────────────────────────────────────────────────
