@@ -5,6 +5,29 @@ import { supabase } from './supabaseClient';
 // Max dimension for either axis — keeps uploads under ~500KB on most devices
 const MAX_PHOTO_DIMENSION = 1600;
 
+// Whitelist of allowed image extensions → canonical MIME type. The upload key
+// and Content-Type are derived from the camera URI, which can carry query
+// strings or unexpected suffixes; never feed an unsanitised extension into
+// the storage key or `image/${ext}` Content-Type header.
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
+function sanitizeExtension(imageUri: string): { ext: string; contentType: string } {
+  // Strip query/fragment, take the last path segment's extension, lowercase it.
+  const clean = imageUri.split(/[?#]/)[0];
+  const raw = (clean.split('.').pop() ?? '').toLowerCase();
+  const ext = raw === 'jpeg' ? 'jpg' : raw;
+  const contentType = EXT_TO_MIME[raw];
+  // Default to jpeg — capturePhoto re-encodes to JPEG on resize, and the
+  // storage bucket only accepts the whitelisted MIME types anyway.
+  if (!contentType) return { ext: 'jpg', contentType: 'image/jpeg' };
+  return { ext, contentType };
+}
+
 export type PhotoLocation = {
   latitude: number;
   longitude: number;
@@ -70,7 +93,7 @@ export const JobPhotoService = {
     routeCode: string
   ): Promise<PhotoUploadResult> {
     const timestamp = new Date();
-    const ext = imageUri.split('.').pop() ?? 'jpg';
+    const { ext, contentType } = sanitizeExtension(imageUri);
     const key = `jobs/${jobId}/${timestamp.getTime()}.${ext}`;
 
     // Fetch the image as a blob
@@ -79,7 +102,7 @@ export const JobPhotoService = {
 
     const { error: uploadError } = await supabase.storage
       .from('job-photos')
-      .upload(key, blob, { contentType: `image/${ext}`, upsert: false });
+      .upload(key, blob, { contentType, upsert: false });
 
     if (uploadError) throw new Error(uploadError.message);
 

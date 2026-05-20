@@ -115,6 +115,18 @@ export default function DriverJobScreen({ route, navigation }: Props) {
 
   function promptCompletionEmail(completedJob: typeof job) {
     if (!completedJob?.agentEmail) return;
+    // agent_email originates from the Google Sheet (semi-trusted admin data).
+    // Validate strictly before putting it in a mailto: URL — a value with a
+    // '?' / '&' / CRLF could inject extra mailto headers (cc/bcc) and silently
+    // leak the completion notice to an attacker-controlled address.
+    const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+    if (!EMAIL_RE.test(completedJob.agentEmail)) {
+      Alert.alert(
+        'Agent email looks invalid',
+        'The agent email on this job is malformed, so no notice was sent. Check it in the admin route detail screen.'
+      );
+      return;
+    }
     Alert.alert(
       'Notify Agent?',
       `Send a completion notice to ${completedJob.agentName ?? completedJob.agentEmail}?`,
