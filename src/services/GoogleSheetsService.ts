@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { secureStorage } from '../utils/secureStorage';
 import { supabase } from './supabaseClient';
 import { GoogleAuthService } from './GoogleAuthService';
 import { SignJob, JobType } from '../data/SignJob';
@@ -76,15 +76,15 @@ async function geocodeAddress(
 
 export const GoogleSheetsService = {
   async getStoredToken(): Promise<string | null> {
-    return SecureStore.getItemAsync(GOOGLE_TOKEN_KEY);
+    return secureStorage.getItem(GOOGLE_TOKEN_KEY);
   },
 
   async storeToken(token: string): Promise<void> {
-    await SecureStore.setItemAsync(GOOGLE_TOKEN_KEY, token);
+    await secureStorage.setItem(GOOGLE_TOKEN_KEY, token);
   },
 
   async clearToken(): Promise<void> {
-    await SecureStore.deleteItemAsync(GOOGLE_TOKEN_KEY);
+    await secureStorage.removeItem(GOOGLE_TOKEN_KEY);
   },
 
   // Fetch rows from a Google Sheet tab, filter by date, geocode each address,

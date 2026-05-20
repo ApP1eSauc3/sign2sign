@@ -1,6 +1,6 @@
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import * as SecureStore from 'expo-secure-store';
+import { secureStorage } from '../utils/secureStorage';
 
 // Required: create a project at console.cloud.google.com, enable the Sheets API,
 // and create OAuth2 credentials.
@@ -51,15 +51,15 @@ export const GoogleAuthService = {
     const json = await response.json();
     if (!response.ok) throw new Error(json.error_description ?? 'Token exchange failed');
 
-    await SecureStore.setItemAsync(TOKEN_KEY, json.access_token);
+    await secureStorage.setItem(TOKEN_KEY, json.access_token);
     if (json.refresh_token) {
-      await SecureStore.setItemAsync(REFRESH_KEY, json.refresh_token);
+      await secureStorage.setItem(REFRESH_KEY, json.refresh_token);
     }
   },
 
   // Silently refresh the access token using the stored refresh token
   async refreshAccessToken(): Promise<string | null> {
-    const refreshToken = await SecureStore.getItemAsync(REFRESH_KEY);
+    const refreshToken = await secureStorage.getItem(REFRESH_KEY);
     if (!refreshToken) return null;
 
     const clientId = GOOGLE_CLIENT_ID_WEB || GOOGLE_CLIENT_ID_IOS;
@@ -76,18 +76,18 @@ export const GoogleAuthService = {
     const json = await response.json();
     if (!response.ok) return null;
 
-    await SecureStore.setItemAsync(TOKEN_KEY, json.access_token);
+    await secureStorage.setItem(TOKEN_KEY, json.access_token);
     return json.access_token;
   },
 
   async isConnected(): Promise<boolean> {
-    const token = await SecureStore.getItemAsync(TOKEN_KEY);
+    const token = await secureStorage.getItem(TOKEN_KEY);
     return !!token;
   },
 
   async disconnect(): Promise<void> {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
-    await SecureStore.deleteItemAsync(REFRESH_KEY);
+    await secureStorage.removeItem(TOKEN_KEY);
+    await secureStorage.removeItem(REFRESH_KEY);
   },
 
   // SCOPES exported so the auth request component can use them

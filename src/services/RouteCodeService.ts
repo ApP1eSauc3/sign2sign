@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { secureStorage } from '../utils/secureStorage';
 import { supabase } from './supabaseClient';
 import { DriverSession, DailyCode, JobType, SignJob } from '../data/SignJob';
 
@@ -55,13 +55,13 @@ function generateSixDigitCode(): string {
 // Stable per-install identifier used to rate-limit code validation attempts
 // in the RPC. Persisted in the device keychain — does not leak across reinstalls.
 async function getOrCreateClientId(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(CLIENT_ID_KEY);
+  const existing = await secureStorage.getItem(CLIENT_ID_KEY);
   if (existing) return existing;
   if (typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function') {
     throw new Error('crypto.randomUUID unavailable — cannot create client id.');
   }
   const id = crypto.randomUUID();
-  await SecureStore.setItemAsync(CLIENT_ID_KEY, id);
+  await secureStorage.setItem(CLIENT_ID_KEY, id);
   return id;
 }
 
