@@ -97,11 +97,15 @@ sign2sign/
 │   └── main.js                     Thin Electron shell — no business logic
 ├── assets/                         App icons and splash (Human-owned)
 ├── supabase/
+│   ├── functions/
+│   │   └── validate-code/index.ts       IP-throttled Edge Function wrapping validate_route_code()
 │   └── migrations/
-│       ├── 001_initial.sql              Initial schema — never edit after push
-│       ├── 002_rls_write_policies.sql   Driver write + admin write policies
-│       ├── 003_code_management.sql      Partial unique index + admin code read policy
-│       └── 004_admin_read_jobs.sql      Admin jobs read policy (survives code expiry)
+│       ├── 006_rate_limit_codes.sql     Per-client rate limit, anon SELECT revoke on jobs, validate/recover RPCs
+│       ├── 007_prune_code_attempts.sql  Periodic prune of code_attempts table
+│       ├── 008_revoke_rpc_from_anon.sql Forces drivers through the Edge Function only
+│       └── 009_storage_policies.sql     Locks down the job-photos bucket
+│       ├── 010_revoke_validate_route_code_from_public.sql  Closes PUBLIC execute bypass left by 008
+│       └── 001_initial.sql                  Committed baseline (prod dump; captures dashboard-era 001–005)
 └── src/
     ├── data/
     │   └── SignJob.ts              SignJob, DriverSession, AppMode, JobUploadState
@@ -442,7 +446,7 @@ Before editing any file, read the `CLAUDE.md` in that layer's directory. Each la
 
 ### Adding a database column
 
-1. Create a new migration file (e.g. `005_add_column.sql`) — never edit pushed migrations
+1. Create a new migration file with the next sequence number (next free: `011_add_column.sql`) — never edit pushed migrations
 2. Update the relevant type in `src/data/`
 3. Update any service that reads or writes that table
 4. Run `supabase db push`

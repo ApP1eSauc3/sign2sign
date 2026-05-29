@@ -149,7 +149,7 @@ photoUrl?: string
 
 ## `SignJob` field names — match the Supabase schema exactly (snake_case → camelCase)
 
-Always verify against `supabase/migrations/001_initial.sql`. Never guess.
+Always verify against `supabase/migrations/` — `001_initial.sql` is the committed baseline and `006_–010_` are the applied migrations on top. When in doubt, check the baseline or a migration that references the columns (e.g. 006 for `route_codes` / `jobs` predicates) or read the typed shape in `RouteCodeService.ts`. Never guess.
 
 | DB column | TypeScript field |
 |---|---|

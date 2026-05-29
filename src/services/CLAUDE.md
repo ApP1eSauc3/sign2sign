@@ -129,17 +129,20 @@ const loc = await Location.getCurrentPositionAsync();  // wrong layer
 
 ## Driver auth — never call `supabase.auth`
 
-Drivers have no Supabase Auth accounts. The 6-digit code IS the credential. RLS handles access.
+Drivers have no Supabase Auth accounts. The 6-digit code IS the credential. Anon has **no** direct SELECT on `route_codes.code` or on `jobs` — all driver reads route through the `validate-code` Edge Function and the SECURITY DEFINER RPCs (`validate_route_code`, `recover_existing_photo`, `complete_job`). See `RouteCodeService.loadSession` for the canonical entry point.
 
 ```typescript
-// ✅ — query route_codes with anon key; RLS gates access
-const { data, error } = await supabase
-  .from('route_codes')
-  .select('*, jobs(*)')
-  .eq('code', code)
-  .eq('is_active', true)
-  .gt('expires_at', new Date().toISOString())
-  .single();
+// ✅ — call the Edge Function, which IP-throttles and invokes validate_route_code()
+const response = await fetch(`${supabaseUrl}/functions/v1/validate-code`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${anonKey}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ code, client_id: clientUuid }),
+});
+if (!response.ok) throw new Error(`validate-code: ${response.status}`);
+const session = await response.json();
+
+// ❌ — direct anon SELECT on route_codes was the old path; revoked in migration 008
+const { data } = await supabase.from('route_codes').select('*, jobs(*)').eq('code', code);
 
 // ❌ — drivers never use Supabase Auth
 await supabase.auth.signInWithPassword({ email, password });
@@ -164,17 +167,20 @@ const { error } = await supabase.auth.signInWithPassword({ email, password });
 |---|---|---|
 | Read active `route_codes` | ✅ (RLS policy) | ✅ |
 | Read `jobs` for active codes | ✅ (RLS policy) | ✅ |
-| Write `jobs` — photo fields + `is_complete` (driver, via route_code join) | ✅ (RLS policy in `002_rls_write_policies.sql`) | ✅ |
+| Read active `route_codes` (id, driver_slot, created_date, expires_at, is_active only — `code` is column-revoked) | ✅ (granted in 006) | ✅ |
+| Read `jobs` | ❌ (revoked in 006) — drivers reach jobs only through `validate_route_code()` / `recover_existing_photo()` RPCs | ✅ |
+| Write `jobs` — photo fields directly (`JobPhotoService.uploadPhoto`) | ✅ via the legacy driver UPDATE policy (originally in migration 002; the file isn't in the repo but the policy still exists in prod — its USING clause checks `route_codes`, not `jobs`, which is why anon UPDATE survives the 006 SELECT revoke) | ✅ |
+| Write `jobs.is_complete` (driver, `JobPhotoService.markJobComplete`) | ✅ via the `complete_job()` RPC (SECURITY DEFINER, FOR UPDATE row lock, idempotent) | ✅ |
 | Write `jobs` — insert new jobs | ❌ | ✅ |
 | Write `route_codes` | ❌ | ✅ |
 
-Driver writes are gated by the RLS policy in `002_rls_write_policies.sql`: a driver can only update a job that belongs to an active, non-expired `route_code`. Only photo fields and `is_complete` are writable this way. The service role key is **never shipped in the app**.
+The service role key is **never shipped in the app**. Edge Function (`supabase/functions/validate-code`) is the only component that holds it.
 
 ---
 
 ## Never read schema field names from memory — read the migration
 
-Always read `supabase/migrations/001_initial.sql` before writing a Supabase query predicate. Never guess column names. The TypeScript field mapping is in `src/data/CLAUDE.md`.
+Always read the migrations in `supabase/migrations/` before writing a Supabase query predicate (`001_initial.sql` baseline + `006_–010_` applied on top). Never guess column names. The TypeScript field mapping is in `src/data/CLAUDE.md`.
 
 ```typescript
 // ✅ — verified against migration
