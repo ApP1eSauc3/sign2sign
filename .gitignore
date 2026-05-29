@@ -41,3 +41,6 @@ yarn-error.*
 /android
 
 electron-build.env
+
+# Supabase CLI scratch
+supabase/.temp/
