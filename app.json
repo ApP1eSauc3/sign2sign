@@ -4,15 +4,21 @@
     "slug": "sign2sign",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "sign2sign",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Sign2Sign needs camera access to photograph completed sign installations and removals.",
+        "NSLocationWhenInUseUsageDescription": "Sign2Sign records your GPS location at the moment a job photo is taken to verify the work location."
+      },
+      "bundleIdentifier": "com.liamhowe.sign2sign"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,10 +27,23 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "predictiveBackGestureEnabled": false,
+      "package": "com.liamhowe.sign2sign"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-image-picker",
+      "expo-location",
+      "expo-web-browser"
+    ]
   }
 }

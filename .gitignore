@@ -42,3 +42,4 @@ yarn-error.*
 
 # Claude Code
 .claude/
+electron-build.env

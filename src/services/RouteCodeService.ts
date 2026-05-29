@@ -1,5 +1,5 @@
 import { secureStorage } from '../utils/secureStorage';
-import { supabase } from './supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 import { DriverSession, DailyCode, JobType, SignJob } from '../data/SignJob';
 
 // DB row shapes — map snake_case DB columns to camelCase domain types at the boundary.
@@ -97,30 +97,64 @@ function expiryNextMorning(): string {
 }
 
 export const RouteCodeService = {
-  // Driver: load session from a 6-digit code via the rate-limited RPC.
+  // Driver: load session from a 6-digit code via the validate-code Edge Function.
   // Returns null when the code is invalid or expired.
   // Throws when there is a network/server problem OR when the caller is rate-limited
-  // (P0005). Callers should surface the thrown message verbatim — it includes
-  // the wait-and-retry instruction for the rate-limited case.
+  // (HTTP 429, from either the function's IP throttle or the RPC's per-client_id
+  // limit). Callers should surface the thrown message verbatim — it includes the
+  // wait-and-retry instruction for the rate-limited case.
+  //
+  // We hit the Edge Function rather than calling validate_route_code() directly:
+  // migration 008 revokes anon's execute grant on that RPC, leaving the function
+  // (service-role key + IP throttle) as the only path. See
+  // supabase/functions/validate-code/index.ts.
   async loadSession(code: string): Promise<DriverSession | null> {
     const clientId = await getOrCreateClientId();
 
-    const { data, error } = await supabase.rpc('validate_route_code', {
-      p_code: code,
-      p_client_id: clientId,
-    });
-
-    if (error) {
-      if (error.code === 'P0005') {
-        throw new Error('Too many attempts. Wait a minute and try again.');
-      }
-      throw new Error(error.message);
+    let response: Response;
+    try {
+      response = await fetch(`${SUPABASE_URL}/functions/v1/validate-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Function is deployed --no-verify-jwt (drivers have no Supabase Auth),
+          // but the API gateway still expects the anon apikey to route the call.
+          // These are public, already-bundled values.
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ code, client_id: clientId }),
+      });
+    } catch {
+      // fetch only rejects on network failure (see src/services/CLAUDE.md).
+      throw new Error('Could not reach the server. Check your connection and try again.');
     }
 
-    if (data === null || data === undefined) return null;
+    // Both throttles (IP-keyed in the function, client_id-keyed in the RPC)
+    // surface as 429. Match the old P0005 message verbatim.
+    if (response.status === 429) {
+      throw new Error('Too many attempts. Wait a minute and try again.');
+    }
 
-    // Narrow the RPC payload — `data` from supabase.rpc is typed as unknown.
-    const payload = data as ValidateRouteCodePayload;
+    // 400/405/500 — a genuine fault, not an invalid code. Don't leak internals.
+    if (!response.ok) {
+      throw new Error('Something went wrong validating that code. Please try again.');
+    }
+
+    let body: { session?: unknown };
+    try {
+      body = await response.json();
+    } catch {
+      throw new Error('Unexpected response from server while loading route.');
+    }
+
+    // The function wraps the RPC result as { session: <payload | null> }.
+    // null means the code is invalid or expired.
+    const session = body.session;
+    if (session === null || session === undefined) return null;
+
+    // Narrow the payload — it crosses the network as unknown.
+    const payload = session as ValidateRouteCodePayload;
     if (!payload || typeof payload !== 'object' || !Array.isArray(payload.jobs)) {
       throw new Error('Unexpected response from server while loading route.');
     }
