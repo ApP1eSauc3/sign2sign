@@ -2,7 +2,7 @@
 
 **Status:** v1.0.0 **shipped** (2026-05-26 → 2026-05-27). Notarized, stapled, published to GitHub Releases. Auto-updater channel live. Every original Electron hardening task plus every originally-out-of-scope item is implemented.
 
-**Last touched:** 2026-05-27 — audit + doc cleanup pass (see "What changed 2026-05-27" below).
+**Last touched:** 2026-05-29 — deploy + repo coherence pass (see "What changed 2026-05-29" below). The current authoritative Open blockers list is at the end of that section.
 
 **Release:** https://github.com/ApP1eSauc3/sign2sign/releases/tag/v1.0.0
 
@@ -47,6 +47,72 @@ Triggered by a "what's left before publishable / any hallucinations?" review. Th
 4. **Brand blue hex unconfirmed.** Currently the `#147EC4` estimate in `src/utils/colors.ts`. Confirm by inspecting sign2site.com.au CSS.
 5. **Google Client IDs in `.env.local`.** Required for the Sheets import flow. Status uncertain without reading the file (Human-owned).
 6. **Windows build deferred.** No Windows code-signing cert. If a Windows admin user is in scope, this becomes a blocker.
+
+---
+
+## What changed 2026-05-29 (deploy + repo coherence)
+
+Triggered by a portfolio-readiness + App Store review with Liam (targeting Moonward Apps Brisbane). The session uncovered that the documented security model wasn't deployed, and that the public repo's HEAD didn't represent a working app — both fixed. Five commits, all pushed to `origin/main`.
+
+### Major findings & fixes
+
+| Finding | Fix |
+|---|---|
+| **Migrations `006_–009_` and the `validate-code` Edge Function had never been deployed to prod.** The Supabase CLI had never been logged in, so `db push` / `functions deploy` never ran. Prod was running the insecure pre-006 schema (anon could read `route_codes.code` → brute-forceable, and all `jobs` for active codes → cross-route PII exposure). The deployed app's driver login (which only calls the Edge Function + `validate_route_code` RPC, neither of which existed) was non-functional against prod. | CLI logged in + linked to project `heynyjopyociaozqnauz`. Edge Function deployed (`supabase functions deploy validate-code --no-verify-jwt`). Migration history table repaired (`002 003 004 005 → reverted`; metadata only, no schema change). `db push` applied `006_→009_`. Live verification confirmed: `code` hidden from anon, anon SELECT on `jobs` revoked, `code_attempts` rate-limit logging, RPC executes. |
+| **Bug in migration 008** — it revoked `EXECUTE` from anon but left Postgres's default `PUBLIC` grant intact. Since anon belongs to `PUBLIC`, it still inherited execute on `validate_route_code`, bypassing the Edge Function's IP throttle (the in-DB `client_id` limit still applied). | Authored + applied **`010_revoke_validate_route_code_from_public.sql`**. Verified per-role execute after apply: `anon: f, public: f, service_role: t` (Edge Function still works). |
+| **Schema baseline not in git.** Dashboard-era `001_–005_` lived only in production; a fresh clone couldn't be rebuilt. | `supabase db dump --schema public` → `supabase/migrations/001_initial.sql` (546 lines; captures everything pre-006). Done via local `pg_dump` 18.3 against the session-pooler URI — bypassed the CLI's Docker dependency. |
+| **HEAD had drifted to template / pre-Edge-Function code.** `App.tsx`, `app.json`, `package.json`/lock, `RouteCodeService.ts`, `supabaseClient.ts`, `assets/icon.png`, `.gitignore` were all stuck on Expo-template or older versions. Cloning the repo produced a non-functional app — and the committed `RouteCodeService` still used the direct-RPC path that 008/010 had just locked down. | Committed the real-app set (`8ae8007`). Pre-commit verification: `tsc --noEmit` clean; Edge Function smoke-tested end-to-end (invalid → `200 {session:null}`, bad format → `400`, **happy path via temp code 999999 → full session payload, then cleaned up**). |
+| **Electron packaging files untracked.** `electron-builder.yml`, `electron/entitlements.mac.plist`, `electron/installer.nsh`, `build/afterPack.js` were never committed despite being referenced by `package.json` scripts — repo couldn't reproduce an Electron build. | Committed as `c88f6c8`. Verified: `verify:electron` clean, `electron-builder.yml` parses, web export builds (608 modules, no `react-native-maps` web crash). `electron-build.env` (Apple creds) stays gitignored. |
+| **Zero test coverage** despite `TESTING.md` prescribing a full setup — and the TESTING.md examples didn't match the real code (wrong store field names; wrong `importJobs` signature; false claim that unknown job types throw). | Installed `ts-jest` (not `jest-expo` — see TESTING.md "Runner choice"). Wrote **36 tests** grounded in the actual code: photo gate, upload state machine, `loadSession` seeding + error mapping, `importJobs` column mapping + date filter + job-type detection + error paths. `npm test` → green in <1s. TESTING.md updated; inaccurate snippets flagged. |
+| **Stale doc claims across the repo** (baseline-only-in-prod, "next free: 010", `006_–009_ on disk", etc.) | Synced `CLAUDE.md`, `CODEBASE_STATUS.md`, `README.md`, `src/data/CLAUDE.md`, `src/services/CLAUDE.md`, this handover. |
+
+### Stress test results (2026-05-29)
+
+- `npx tsc --noEmit` — clean, exit 0 (twice: before real-app commit, and after adding tests)
+- `npm test` — 36 tests, 2 suites passed, ~0.5s
+- `npm run verify:electron` — clean
+- `npm run web` — bundled 608 modules; `dist/index.html` produced; no `react-native-maps` web crash
+- `supabase migration list` — `001, 006, 007, 008, 009, 010` Local = Remote; `002–005` marked reverted
+- Edge Function live: invalid code → `200 {session:null}`; bad format → `400`; valid temp code → full session payload (then deleted)
+- Per-role `EXECUTE` on `validate_route_code`: `anon: f, public: f, authenticated: t, service_role: t`
+
+### Commits on `main` (2026-05-29 → pushed)
+
+```
+5d94f84 test: add ts-jest suite for driver session store + sheets import
+c88f6c8 build: commit Electron packaging config (builder, entitlements, fuses, installer)
+8ae8007 feat: commit working app entry, config, deps, and driver Edge Function path
+e2781b9 security: deploy 006-010 hardening + commit schema baseline
+```
+
+### Current Open blockers (authoritative — supersedes earlier lists)
+
+Status as of 2026-05-29. Each item is what the *next* session should pick up.
+
+**Security hygiene — do first:**
+1. **Rotate the DB password and the `sb_secret_…` API key.** Both ended up in plaintext in the working transcript during this session. Reset in Supabase Settings → Database / API Keys. Nothing in the app uses the DB password; the Edge Function reads its service-role key from injected env — both are safe to rotate.
+
+**App Store submission gates (the path Liam is targeting):**
+2. **Privacy policy + App Privacy "nutrition labels."** Collected data: photos, GPS, agent emails. Privacy policy URL required; nutrition labels must be accurate.
+3. **In-app admin account deletion (Apple Guideline 5.1.1(v)).** Admins have Supabase Auth accounts; need an in-app deletion path. Drivers are codeless — exempt.
+4. **App icon + splash.** Still Expo placeholders. `assets/` is Human-owned per Control table — needs brand assets.
+5. **Brand-blue hex unconfirmed.** Currently the `#147EC4` estimate in `src/utils/colors.ts`. Confirm by inspecting sign2site.com.au CSS.
+6. **Google Client IDs in `.env.local`.** `EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS` / `_WEB` required for the Sheets import flow.
+7. **Distribution decision: public App Store vs Apple Business Manager.** Sign2Sign is a single-company field-ops tool. Public submission risks 4.2 (minimum functionality) and 2.1 (reviewer can't get past the login wall). If public: provide working demo creds in App Review notes, and ensure a code stays valid through review (codes expire 06:00 daily — easy to miss).
+8. **Android `RECORD_AUDIO` permission** declared in `app.json` but unused (likely pulled by image-picker's video support). Play Store noise — remove if Android is in scope.
+
+**Manual verification (Liam's machine only):**
+9. **GUI launch** — `npm run electron:dev` to confirm the window renders and admin login works visually.
+10. **Full notarized DMG build** — `npm run electron:build:mac` end-to-end (needs Apple signing creds + ~15 min).
+
+**Coverage gaps:**
+11. **Screen-flow tests** — `@testing-library/react-native` + `jest-expo` in a second jest project. Highest-value target: the driver advancing-action button flow.
+12. **Offline-queue `flush` tests** — `OfflineQueueService.flush` happy + failure paths.
+
+**Repo hygiene / decisions:**
+13. **Two client screenshots in repo root** (`Screenshot 2026-03-20…png`, `Sige2site-04.png`) — left untracked. Contain client PII; need consent before they go anywhere near the public repo. Default: keep untracked or delete.
+14. **`TYPESAFETY.md` and `SKILLS.md`** still untracked. Decide whether to commit (referenced by README) or leave.
+15. **Windows build** — no Windows code-signing cert. Defer until a Windows admin user is in scope.
 
 ---
 
