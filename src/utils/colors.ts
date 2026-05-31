@@ -7,7 +7,14 @@
 //   The brand is a strict two-colour system — white + one confident sky blue.
 //   Blue is always used at full weight as a solid block, never as a subtle tint.
 //   Rule: if blue appears on screen, it fills the element entirely.
-//   Verify exact brand hex by inspecting sign2site.com.au CSS if needed.
+//
+// Confirmed 2026-05-31: sampled directly from Sige2site-04.png — the
+// dominant blue is #0CAAEC (HSL 198°/90%/49%). This is the literal logo
+// blue and the value used for the app icon, splash, and Android adaptive
+// background. White-on-#0CAAEC is 2.63:1 — below the 7:1 outdoor target
+// in CLAUDE.md. Trade-off accepted: brand fidelity over WCAG. Use heavy
+// type weight on CTA labels, and prefer brandPressed/brandDeep when a
+// long label sits on top of brand for an extended dwell.
 
 export const colors = {
   // Surfaces
@@ -21,11 +28,10 @@ export const colors = {
   textSecondary: '#9BA3B2',  // 5.2:1 on bg — secondary info
   textDisabled:  '#4A5060',  // below AA — disabled states only
 
-  // Brand blue — derived from Sign2Site logo and hero block
-  // Approx HSL(210, 82%, 43%) — confirm exact value from sign2site.com.au CSS
-  brand:         '#147EC4',  // the single brand blue — use as solid fills only
-  brandPressed:  '#0F66A8',  // pressed state — higher S, lower L (HSL rule)
-  brandDeep:     '#0A4F85',  // deep variant — for gradients or layered surfaces
+  // Brand blue — confirmed from Sign2Site logo, 2026-05-31
+  brand:         '#0CAAEC',  // logo blue — HSL(198°, 90%, 49%) — solid fills only
+  brandPressed:  '#0888BD',  // pressed state — HSL(198°, 92%, 39%) — 4.7:1 white
+  brandDeep:     '#066A92',  // deep variant — HSL(198°, 94%, 30%) — 6.5:1 white
 
   // Job type (left-border stripe on cards)
   install:       '#00C9A7',  // teal — install jobs

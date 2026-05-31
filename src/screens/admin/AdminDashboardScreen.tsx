@@ -166,13 +166,22 @@ export default function AdminDashboardScreen({ navigation }: Props) {
           <Text style={styles.headerTitle}>Dashboard</Text>
           <Text style={styles.headerSub}>SIGN2SIGN ADMIN</Text>
         </View>
-        <TouchableOpacity
-          style={styles.signOutButton}
-          onPress={handleSignOut}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.signOutButton}
+            onPress={() => navigation.navigate('Account')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.signOutText}>Account</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.signOutButton}
+            onPress={handleSignOut}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.divider} />
@@ -420,6 +429,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 1,
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   signOutButton: {
     paddingHorizontal: 14,
     paddingVertical: 8,

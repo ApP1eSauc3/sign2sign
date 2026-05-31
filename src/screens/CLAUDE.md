@@ -73,8 +73,8 @@ backgroundColor: '#147EC4'
 | `colors.bg` | `#0F1117` | Driver screen base — absorbs outdoor glare |
 | `colors.surface` | `#1A1D27` | Cards, list items |
 | `colors.surfaceActive` | `#22263A` | Pressed / selected — HSL variation, not opacity |
-| `colors.brand` | `#147EC4` | Solid fill only — buttons, active nav |
-| `colors.brandPressed` | `#0F66A8` | Pressed state — higher S, lower L |
+| `colors.brand` | `#0CAAEC` | Solid fill only — buttons, active nav (confirmed from logo 2026-05-31) |
+| `colors.brandPressed` | `#0888BD` | Pressed state — higher S, lower L |
 | `colors.textPrimary` | `#F5F7FA` | 16:1 on bg — primary labels |
 | `colors.textSecondary` | `#9BA3B2` | 5.2:1 on bg — secondary info |
 | `colors.install` | `#00C9A7` | Install job left stripe |

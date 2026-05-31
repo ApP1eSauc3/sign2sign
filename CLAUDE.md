@@ -125,7 +125,7 @@ When any UI work is required — new screens, layout changes, colour changes, co
 
 ### Brand identity *(from sign2site.com.au)*
 
-The brand is a strict two-colour system: **white + one sky blue**. No gradients, no third colour. When brand blue appears, it fills the element entirely — solid block, white text on top. Confirm exact hex by inspecting sign2site.com.au; current estimate: `#147EC4`.
+The brand is a strict two-colour system: **white + one sky blue**. No gradients, no third colour. When brand blue appears, it fills the element entirely — solid block, white text on top. Brand blue confirmed 2026-05-31 by sampling the Sign2Site logo: `#0CAAEC` (HSL 198°/90%/49%). White-on-brand contrast is 2.63:1 — brand fidelity is preferred over the WCAG outdoor target on CTA fills; see `src/utils/colors.ts` for the trade-off note.
 
 Full colour token table, HSL rules, touch targets, component patterns, and the full design system live in **`src/screens/CLAUDE.md`** and **`src/utils/CLAUDE.md`**.
 
