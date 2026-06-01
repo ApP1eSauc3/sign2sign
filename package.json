@@ -29,7 +29,7 @@
     "expo-image-picker": "~55.0.13",
     "expo-location": "~55.1.4",
     "expo-network": "~55.0.9",
-    "expo-secure-store": "~55.0.9",
+    "expo-secure-store": "~56.0.4",
     "expo-status-bar": "~55.0.4",
     "expo-web-browser": "~55.0.10",
     "react": "19.2.0",
