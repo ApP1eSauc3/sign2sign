@@ -21,8 +21,9 @@ import { colors } from '../../utils/colors';
 type Props = NativeStackScreenProps<AdminStackParamList, 'Account'>;
 
 // Privacy policy URL — keep in sync with PRIVACY.md hosting destination.
-// See docs/APP_PRIVACY_LABELS.md §"Hosting the policy" for the choices.
-const PRIVACY_POLICY_URL = 'https://sign2site.com.au/privacy';
+// Published via GitHub Pages off the public repo (2026-05-31). Migrate to
+// https://sign2site.com.au/privacy once the customer's CMS hosts the policy.
+const PRIVACY_POLICY_URL = 'https://app1esauc3.github.io/sign2sign/PRIVACY';
 
 // Required confirmation phrase before the destructive button enables.
 const CONFIRM_PHRASE_LABEL = 'tapping the button twice';

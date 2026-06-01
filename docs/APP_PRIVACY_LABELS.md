@@ -101,20 +101,24 @@ Apple requires a public URL. Set it to wherever you publish `PRIVACY.md`.
 
 ## Hosting the policy
 
-Cheapest valid options, in order of preference:
+**Current host (live since 2026-05-31):** GitHub Pages off the public
+`ApP1eSauc3/sign2sign` repo, built from `main` / `/`. Policy URL:
 
-1. **GitHub Pages on the existing repo.** Repo is already public
-   (`ApP1eSauc3/sign2sign`). Enable Pages: Settings → Pages → Build from
-   `main` branch, `/ (root)`. URL becomes
-   `https://app1esauc3.github.io/sign2sign/PRIVACY` (GitHub renders
-   `.md` automatically). Free, versioned via git history, zero ops.
-2. **A `/privacy` page on sign2site.com.au.** Better long-term home if
-   sign2site.com.au is the public face. Cut-and-paste the rendered
-   Markdown into the CMS, point the App Store field at
-   `https://sign2site.com.au/privacy`.
-3. A static page on Netlify / Cloudflare Pages pointing at the repo.
+```
+https://app1esauc3.github.io/sign2sign/PRIVACY
+```
 
-Whichever you pick, the URL must be reachable without authentication.
+This is the URL wired into `src/screens/admin/AccountScreen.tsx`
+(`PRIVACY_POLICY_URL`) and is the URL to paste into App Store Connect.
+
+**Migration path (recommended before full production):** move the
+policy to `https://sign2site.com.au/privacy` once the customer's CMS is
+ready. When you do, update both:
+
+1. `PRIVACY_POLICY_URL` in `AccountScreen.tsx`.
+2. The Apple field in App Store Connect → App Privacy.
+
+The GitHub Pages copy can stay live as a redundant mirror — no harm.
 
 ---
 
