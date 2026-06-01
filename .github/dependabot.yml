@@ -1,0 +1,32 @@
+# Sign2Sign — Dependabot config
+# Closes R10 from docs/SECURITY_AUDIT_2026_06_01.md.
+#
+# Weekly is the right cadence for a low-velocity project: noisy enough to
+# keep advisories visible, quiet enough to batch review. Patch + minor are
+# auto-grouped so each weekly PR is small; majors fall out one-per-PR so
+# breaking-change review stays focused.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Australia/Perth
+    open-pull-requests-limit: 5
+    groups:
+      patch-and-minor:
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Australia/Perth
+    open-pull-requests-limit: 3
