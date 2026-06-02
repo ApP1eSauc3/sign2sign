@@ -25,8 +25,6 @@ type Props = NativeStackScreenProps<AdminStackParamList, 'Account'>;
 // https://sign2site.com.au/privacy once the customer's CMS hosts the policy.
 const PRIVACY_POLICY_URL = 'https://app1esauc3.github.io/sign2sign/PRIVACY';
 
-// Required confirmation phrase before the destructive button enables.
-const CONFIRM_PHRASE_LABEL = 'tapping the button twice';
 
 export default function AccountScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -71,6 +69,8 @@ export default function AccountScreen({ navigation }: Props) {
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}  // DESIGN §3.4 — icon hit slop
+          accessibilityRole="button"
+          accessibilityLabel="Back to dashboard"
         >
           <Text style={styles.backChevron}>‹</Text>
         </TouchableOpacity>
@@ -105,13 +105,16 @@ export default function AccountScreen({ navigation }: Props) {
         <View style={[styles.sectionCard, styles.dangerCard]}>
           <Text style={styles.dangerTitle}>Delete account</Text>
           <Text style={styles.dangerBody}>
-            Permanently deletes your admin login. You will be signed out
-            immediately and won't be able to recover this account.
+            Permanently deletes your admin email + password from our
+            authentication system. You will be signed out immediately and
+            won't be able to recover this account.
           </Text>
           <Text style={styles.dangerBody}>
-            Routes and jobs you imported stay on the customer's records —
-            they belong to the operating entity, not to you personally. If
-            you also need those removed, contact your administrator.
+            Routes and jobs you imported, plus the photos drivers
+            captured against them, stay on the customer's records — they
+            belong to the operating entity, not to you personally. If you
+            also need those removed, email the customer's privacy
+            contact.
           </Text>
 
           {!confirmArmed ? (
@@ -125,7 +128,8 @@ export default function AccountScreen({ navigation }: Props) {
           ) : (
             <>
               <Text style={styles.confirmHint}>
-                Confirm by {CONFIRM_PHRASE_LABEL}. This cannot be undone.
+                This will permanently delete your account. Tap "Delete
+                forever" to confirm.
               </Text>
               <View style={styles.confirmRow}>
                 <TouchableOpacity
