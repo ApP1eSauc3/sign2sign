@@ -108,20 +108,26 @@ native and protected by the OS keychain on desktop. Service-role
 key is never bundled (confirmed by `grep` over `src/` and
 `package.json` — only the anon key is present).
 
-## 6. Residual gaps (severity + recommendation)
+## 6. Residual gaps (status as of 2026-06-02)
 
-| # | Item | Severity | Recommendation |
+| # | Item | Severity | Status |
 |---|---|---|---|
-| R1 | `disable_signup` is `false` (public can hit `/auth/v1/signup`) | **High** | Set true in dashboard. Confirm AdminLoginScreen still works (it doesn't call signup). Without this, anyone with the bundled anon key + Supabase URL can create a parallel `auth.users` row — they wouldn't get any RLS-protected data, but it muddies your audit trail and consumes email quota. |
-| R2 | Password policy = Supabase default | **High** | Dashboard → Authentication → Password: min 12, require letters + numbers + symbols. Document in admin onboarding so the customer's IT person picks a real password. |
-| R3 | Leaked-password (HIBP) check off | **Medium** | Dashboard toggle, free. |
-| R4 | MFA not enforced | **Medium** | Enable TOTP; surface the enrollment URL in AccountScreen later. Not a launch blocker but recommended before the customer goes live. |
-| R5 | Captcha on auth not enabled | **Medium** | Enable hCaptcha before public launch. Built-in rate limits help but captcha closes the brute-force loop. |
-| R6 | Supabase service-role key + `sb_secret_…` + DB password exposed in working session on 2026-05-29 | **High** | Pending Liam's go-ahead per the LADE 2026-05-29 handover. Rotate all three in dashboard → Settings → API / Database. The new `delete-admin-account` function picks up the new service-role key automatically on next deploy. |
-| R7 | `--no-verify-jwt` posture audit for `validate-code` | **Verified** | Intentional and documented; drivers have no JWT. Driver path is hardened by IP throttle + per-client_id DB throttle + RPC SECURITY DEFINER row lock. No change. |
-| R8 | Admin login screen — error message enumeration | **Low** | Supabase Auth returns the same generic error for "wrong password" vs "no such user". Code in `AdminLoginScreen.tsx` surfaces `error.message` directly — fine for now (Supabase already generalises it). Re-check if you ever switch to a self-hosted auth provider. |
-| R9 | No CSP / `X-Frame-Options` on the GitHub Pages policy URL | **Low** | The policy is a static markdown page. GitHub Pages doesn't let you set custom headers without a CDN in front. Not worth solving for a privacy policy; revisit if you move to `sign2site.com.au/privacy`. |
-| R10 | Expo deps: `expo-network`, `expo-location`, etc. — no automated dep-vulnerability scan in CI | **Low** | `npm audit` shows the current state. Wire a `Dependabot` config or a `gh actions` step on the repo to surface advisories. |
+| R1 | `disable_signup` was `false` | **High** | ✅ **Closed 2026-06-02.** PATCH applied via Management API → `disable_signup: true`. Verified: `POST /auth/v1/signup` now returns 422 `signup_disabled`. |
+| R2 | Password policy = Supabase default | **High** | ✅ **Closed 2026-06-02.** PATCH → `password_min_length: 12`, `password_required_characters` set to the lower+upper+digit+symbol enum. Caveat: the `/auth/v1/admin/users` endpoint bypasses password policy by design (Supabase behaviour, documented) — so anyone with the service role can still create weak-password users. This matches the threat model (service role = full DB access already), but means admin onboarding scripts should not paste short passwords. Policy IS enforced on the realistic threat surface: self-signup (now disabled anyway), password reset, and self-update. |
+| R3 | Leaked-password (HIBP) check off | **Medium** | ✅ **Closed 2026-06-02.** PATCH → `password_hibp_enabled: true`. Password resets / new admin self-update will now be checked against Have I Been Pwned. |
+| R4 | MFA not enforced | **Medium** | ✅ **Closed 2026-06-02.** Discovered already-enabled on inspection: `mfa_totp_enroll_enabled: true`, `mfa_totp_verify_enabled: true`. Enrollment surface still needs UI work in `AccountScreen.tsx` (Supabase's `enroll/verify/challenge` MFA API) — not a launch blocker but tracked as R4-followup below. |
+| R5 | Captcha on auth not enabled | **Medium** | **Open.** Confirmed: `security_captcha_enabled: false`, `security_captcha_provider: hcaptcha`. Needs an hCaptcha account → site key + secret pasted in dashboard → Auth → Attack Protection. I can wire the API toggle once you give me the site key + secret. |
+| R6 | Service-role key + `sb_secret_…` + DB password exposed 2026-05-29 | **High** | **Open**, gated on Liam's go-ahead per the LADE 2026-05-29 handover. Coordination required: rotating service-role JWT invalidates anon-side caches and requires redeploying both edge functions; rotating DB password ripples to every consumer (LADE Lambdas, local dev). |
+| R7 | `--no-verify-jwt` for `validate-code` | **Verified** | Intentional and documented; drivers have no JWT. Driver path is hardened by IP throttle + per-client_id DB throttle + RPC SECURITY DEFINER row lock. No change. |
+| R8 | Admin login error enumeration | **Mooted** | R1 closes this. With signup disabled and admins created via admin API with `email_confirm: true`, the only enumeration message ("Email not confirmed") is unreachable for production accounts. No code change needed. |
+| R9 | No CSP / `X-Frame-Options` on GH Pages policy URL | **Low** | Open. GH Pages can't set custom headers. Revisit when policy moves to `sign2site.com.au/privacy`. |
+| R10 | No automated dep-vulnerability scan | **Low** | ✅ **Closed 2026-06-02.** `.github/dependabot.yml` shipped — weekly Perth-time scan of npm + actions, patch+minor batched, majors land individually. |
+
+### Follow-up tracker
+
+- **R4-followup**: MFA enrollment is server-enabled but no UI exists. `AccountScreen.tsx` should grow an "Enable two-factor authentication" row that calls `supabase.auth.mfa.enroll({ factorType: 'totp' })`, renders the returned QR code, and verifies via `supabase.auth.mfa.challenge` + `verify`. Optional for v1; required before customer rollout.
+- **R5**: hCaptcha onboarding. ~10 minutes once you have an hCaptcha account.
+- **R6**: Credential rotation coordination plan.
 
 ## 7. Industry-standard mappings
 
@@ -143,14 +149,16 @@ frameworks this audit lines up against:
 
 Before App Store submission:
 
-- [ ] Toggle R1–R5 in the Supabase dashboard.
-- [ ] Rotate exposed credentials (R6).
+- [x] ~~Toggle R1–R4 in the Supabase dashboard~~ — applied via
+      Management API on 2026-06-02.
+- [x] ~~Add CI dependency scan (R10)~~ — Dependabot shipped.
+- [ ] R5: wire hCaptcha (needs site key + secret from you).
+- [ ] R6: rotate exposed credentials.
 - [ ] Smoke-test admin login + account deletion on a real device
       with the production project keys.
 - [ ] Resolve the Sign2Site / Sign2Sign domain discrepancy
       (sign2site.com.au vs bryanna@sign2sign.com.au) with the
       customer.
-- [ ] Add CI dependency scan (R10) — not a blocker but cheap.
 
 Once shipped, audit cadence: re-run this checklist quarterly or
 when adding any of: a new third-party SDK; a new edge function;
