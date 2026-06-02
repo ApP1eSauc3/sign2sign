@@ -214,16 +214,26 @@ export default function AdminDashboardScreen({ navigation }: Props) {
               style={[styles.stepperButton, driverCount <= MIN_DRIVERS && styles.stepperButtonDisabled]}
               onPress={() => setDriverCount((n) => Math.max(MIN_DRIVERS, n - 1))}
               disabled={driverCount <= MIN_DRIVERS}
+              accessibilityRole="button"
+              accessibilityLabel="Decrease driver count"
+              accessibilityState={{ disabled: driverCount <= MIN_DRIVERS }}
             >
-              <Text style={styles.stepperButtonText}>−</Text>
+              <Text style={styles.stepperButtonText} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">−</Text>
             </TouchableOpacity>
-            <Text style={styles.stepperValue}>{driverCount}</Text>
+            <Text
+              style={styles.stepperValue}
+              accessibilityLiveRegion="polite"
+              accessibilityLabel={`${driverCount} drivers`}
+            >{driverCount}</Text>
             <TouchableOpacity
               style={[styles.stepperButton, driverCount >= MAX_DRIVERS && styles.stepperButtonDisabled]}
               onPress={() => setDriverCount((n) => Math.min(MAX_DRIVERS, n + 1))}
               disabled={driverCount >= MAX_DRIVERS}
+              accessibilityRole="button"
+              accessibilityLabel="Increase driver count"
+              accessibilityState={{ disabled: driverCount >= MAX_DRIVERS }}
             >
-              <Text style={styles.stepperButtonText}>+</Text>
+              <Text style={styles.stepperButtonText} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">+</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -254,6 +264,10 @@ export default function AdminDashboardScreen({ navigation }: Props) {
                 onPress={() =>
                   setSelectedRouteCodeId(selectedRouteCodeId === c.id ? null : c.id)
                 }
+                accessibilityRole="button"
+                accessibilityLabel={`Driver ${c.driverSlot}, code ${c.code.split('').join(' ')}`}
+                accessibilityState={{ selected: selectedRouteCodeId === c.id }}
+                accessibilityHint="Selects this driver to receive imported jobs"
               >
                 <Text style={styles.codeSlot}>DRIVER {c.driverSlot}</Text>
                 <Text style={styles.codeValue}>{c.code}</Text>
@@ -387,6 +401,8 @@ export default function AdminDashboardScreen({ navigation }: Props) {
                   })
                 }
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Open route detail for Driver ${c.driverSlot}, code ${c.code.split('').join(' ')}, active`}
               >
                 <View style={styles.routeSlotDot} />
                 <View style={styles.routeRowContent}>
@@ -397,7 +413,7 @@ export default function AdminDashboardScreen({ navigation }: Props) {
                   <View style={styles.routeActiveBadge}>
                     <Text style={styles.routeActiveBadgeText}>ACTIVE</Text>
                   </View>
-                  <Text style={styles.routeChevron}>›</Text>
+                  <Text style={styles.routeChevron} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">›</Text>
                 </View>
               </TouchableOpacity>
             ))

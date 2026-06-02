@@ -20,10 +20,10 @@ here.
 | A8 | Sharpen location purpose string | Low | ✅ closed |
 | A9 | Account-deletion microcopy | Low | ✅ closed |
 | A10 | Brand contrast `#0CAAEC` on white = 2.63:1 | Medium | Open — accepted trade-off (see [[Brand token decision]]); revisit if Apple flags |
-| A11 | Dynamic Type / accessibility labels | Medium | Partial — added on AccountScreen back button; broader sweep pending |
+| A11 | Dynamic Type / accessibility labels | Medium | ✅ closed for icon-only / decorative-glyph controls (sweep 2026-06-02). Dynamic Type itself still untested at AX5. |
 | A12 | iPad support decision | High | ✅ closed — `supportsTablet: false` |
 | A13 | App Store Connect metadata + screenshots | High | Open — needs human design + ASC submission |
-| A14 | Driver codeless reviewer notes | Low | Open — pre-write before submission |
+| A14 | Driver codeless reviewer notes | Low | ✅ closed — `docs/APP_REVIEW_NOTES.md` ready to paste into App Store Connect (three `<<…>>` placeholders to fill on submission day) |
 | A15 | Expo SDK 55 archive smoke test | Low | Open — do before submission |
 | A16 | Optional Terms of Service | Low | Deferred |
 
@@ -77,21 +77,22 @@ so VoiceOver doesn't read "less-than sign".
       promotional text (<170 char), keywords (<100 char), pick primary
       category (suggested: Business), prepare reviewer demo admin
       login + an active 6-digit driver code.
-- [ ] **A14 — App Review Notes.** Pre-write text explaining:
-      (1) drivers don't have accounts; they enter a daily-rotating
-      6-digit code given by the dispatcher;
-      (2) Google OAuth is *not* a login — it authorises a single Google
-      Sheet for the import flow only.
+- [x] ~~A14 — App Review Notes.~~ Pre-written at
+      `docs/APP_REVIEW_NOTES.md`. On submission day: fill the three
+      `<<…>>` placeholders (demo admin email/password and the day's
+      driver code), paste into ASC.
 - [ ] **A15 — Production-archive smoke.** One real-device archive via
       Xcode (or `eas build --profile production`). Cold-start time,
       no `__DEV__`-only code, Hermes/JSC choice matches your perf
       testing.
-- [ ] **A11 (continued) — Accessibility sweep.** Currently only the
-      AccountScreen back chevron has labels. Add `accessibilityLabel`s
-      to the `›` route chevrons in `AdminDashboardScreen.tsx` and
-      `AdminRouteDetailScreen.tsx`, the `−`/`+` stepper buttons, the
-      code-selection cards. Run iOS simulator with VoiceOver before
-      submission.
+- [x] ~~A11 — Accessibility sweep.~~ Done 2026-06-02. Labels on the
+      stepper +/-, code cards, route rows, danger buttons, privacy
+      link; decorative ✓ / › / − / + glyphs marked as elements-hidden;
+      text inputs (admin email + password, driver code) now have
+      `accessibilityLabel` + iOS `textContentType` for AutoFill. Still
+      to do before submission: run iOS Simulator with VoiceOver on the
+      golden path (mode select → admin login → dashboard → account →
+      delete) and at AX5 Dynamic Type to confirm no overflow.
 - [ ] **A10 — Contrast re-decision (optional).** Current brand fill
       `#0CAAEC` + white text = 2.63:1, accepted as a brand-fidelity
       trade-off (logged in `src/utils/colors.ts`). If you want to

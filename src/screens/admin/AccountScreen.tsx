@@ -95,9 +95,12 @@ export default function AccountScreen({ navigation }: Props) {
             style={styles.linkRow}
             onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
             activeOpacity={0.7}
+            accessibilityRole="link"
+            accessibilityLabel="View privacy policy"
+            accessibilityHint="Opens the privacy policy in your browser"
           >
             <Text style={styles.linkLabel}>View privacy policy</Text>
-            <Text style={styles.linkChevron}>›</Text>
+            <Text style={styles.linkChevron} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">›</Text>
           </TouchableOpacity>
         </View>
 
@@ -122,6 +125,9 @@ export default function AccountScreen({ navigation }: Props) {
               style={styles.armButton}
               onPress={handleArm}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Delete account"
+              accessibilityHint="Reveals the final confirmation step"
             >
               <Text style={styles.armButtonText}>Delete account…</Text>
             </TouchableOpacity>
@@ -137,6 +143,9 @@ export default function AccountScreen({ navigation }: Props) {
                   onPress={() => setConfirmArmed(false)}
                   disabled={isDeleting}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel"
+                  accessibilityState={{ disabled: isDeleting }}
                 >
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
@@ -145,6 +154,10 @@ export default function AccountScreen({ navigation }: Props) {
                   onPress={handleConfirmDelete}
                   disabled={isDeleting}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete forever"
+                  accessibilityHint="Permanently deletes your admin account"
+                  accessibilityState={{ disabled: isDeleting, busy: isDeleting }}
                 >
                   {isDeleting ? (
                     <ActivityIndicator color={colors.white} />
