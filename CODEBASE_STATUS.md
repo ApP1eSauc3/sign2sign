@@ -33,7 +33,8 @@ Install new skills via: `claude /plugin install <skill>@<marketplace>`
 | Supabase schema (on-disk) | ✅ Built | `001_initial.sql` is the committed baseline (`supabase db dump --schema public` of prod, captures everything 001–005 created via dashboard). Migrations `006`–`010` are committed AND applied to prod (`supabase db push`, 2026-05-29). Migration history table repaired so 002–005 are marked reverted (their objects live in the baseline). A fresh deploy is now fully reconstructible from git. |
 | validate-code Edge Function | ✅ Deployed | Deployed to prod 2026-05-29 (`supabase functions deploy validate-code --no-verify-jwt`). It is the only path to `validate_route_code()` — anon and PUBLIC execute were revoked (008 + 010). |
 | Supabase env vars | ✅ Set | `.env.local` exists (gitignored). Verify values point at the right project before any release. |
-| iOS permissions | ✅ Built | Camera + location descriptions in `app.json` |
+| iOS permissions | ✅ Built | Camera + sharpened location descriptions in `app.json`. Five unused Expo-prebuild placeholders pruned 2026-06-02 (Face ID, NSLocationAlways*, microphone, photo library). `ITSAppUsesNonExemptEncryption=false` declared. iPad support dropped (`supportsTablet: false`). |
+| iOS privacy manifest | ✅ Built | `ios/sign2sign/PrivacyInfo.xcprivacy` declares required-reason APIs (FileTimestamp, UserDefaults, DiskSpace, SystemBootTime) and `NSPrivacyCollectedDataTypes` for email, photos, precise location, user ID, device ID. Mirrors `docs/APP_PRIVACY_LABELS.md`. |
 | Session restoration | ✅ Built | Admin session restored on launch via `AppNavigator` |
 | Interface style | ✅ Fixed | `automatic` — driver dark / admin light both get correct system chrome |
 | Google OAuth2 service | ✅ Built | `GoogleAuthService` + `GoogleConnectScreen` — needs client IDs in `.env.local` |
