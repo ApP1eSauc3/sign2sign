@@ -60,6 +60,9 @@ export default function DriverCodeScreen({ navigation }: Props) {
           returnKeyType="go"
           onSubmitEditing={handleSubmit}
           autoFocus
+          accessibilityLabel="Six-digit daily route code"
+          accessibilityHint="Enter the six digits your dispatcher gave you today"
+          textContentType="oneTimeCode"
         />
 
         {codeError && <Text style={styles.errorText}>{codeError}</Text>}

@@ -95,8 +95,8 @@ export default function DriverRouteScreen({ navigation }: Props) {
 
       {/* Route complete hero — shown above the job list when all done */}
       {allComplete && (
-        <View style={styles.completeHero}>
-          <Text style={styles.completeIcon}>✓</Text>
+        <View style={styles.completeHero} accessibilityRole="header" accessible>
+          <Text style={styles.completeIcon} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">✓</Text>
           <Text style={styles.completeTitle}>Route Complete</Text>
           <Text style={styles.completeSub}>
             {installs > 0 ? `${installs} install${installs !== 1 ? 's' : ''}` : ''}
@@ -175,6 +175,9 @@ function JobCard({
       ]}
       onPress={onPress}
       activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`${job.jobType} job at ${job.address}, status ${statusLabel.toLowerCase()}, ${photoLabel.toLowerCase()}`}
+      accessibilityHint="Opens the job detail to capture a photo and mark complete"
     >
       {/* Row 1: status + type */}
       <View style={styles.cardRow}>

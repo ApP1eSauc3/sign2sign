@@ -68,7 +68,7 @@ export default function AdminLoginScreen({ navigation }: Props) {
       >
         <Text style={styles.formTitle}>Admin Login</Text>
 
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label} nativeID="adminEmailLabel">Email</Text>
         <TextInput
           style={styles.input}
           placeholder="you@sign2sign.com.au"
@@ -77,11 +77,15 @@ export default function AdminLoginScreen({ navigation }: Props) {
           autoCorrect={false}
           keyboardType="email-address"
           returnKeyType="next"
+          textContentType="username"
+          autoComplete="email"
+          accessibilityLabel="Email address"
+          accessibilityLabelledBy="adminEmailLabel"
           value={email}
           onChangeText={setEmail}
         />
 
-        <Text style={styles.label}>Password</Text>
+        <Text style={styles.label} nativeID="adminPasswordLabel">Password</Text>
         <TextInput
           style={styles.input}
           placeholder="Password"
@@ -89,6 +93,10 @@ export default function AdminLoginScreen({ navigation }: Props) {
           secureTextEntry
           returnKeyType="go"
           onSubmitEditing={handleLogin}
+          textContentType="password"
+          autoComplete="current-password"
+          accessibilityLabel="Password"
+          accessibilityLabelledBy="adminPasswordLabel"
           value={password}
           onChangeText={setPassword}
         />
