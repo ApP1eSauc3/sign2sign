@@ -18,6 +18,11 @@ updates:
     open-pull-requests-limit: 5
     groups:
       patch-and-minor:
+        exclude-patterns:
+          # react-native uses 0.x.y — a "minor" bump (e.g. 0.83 → 0.85) is a
+          # de-facto major and must be peer-aligned with the Expo SDK. Keep it
+          # in its own PR so it can be reviewed alongside an SDK bump.
+          - "react-native"
         update-types:
           - patch
           - minor
