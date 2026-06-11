@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.liamhowe.sign2sign",
+      "bundleIdentifier": "com.sign2sign.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },

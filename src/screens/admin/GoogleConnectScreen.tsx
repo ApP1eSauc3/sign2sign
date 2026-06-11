@@ -36,7 +36,8 @@ export default function GoogleConnectScreen({ navigation }: Props) {
       // Google rejects the token exchange with redirect_uri_mismatch if this
       // differs by even a trailing slash from the one used in the authorize call.
       const redirectUri = request?.redirectUri;
-      if (!redirectUri) {
+      const clientId = request?.clientId;
+      if (!redirectUri || !clientId) {
         setError('OAuth request not ready — try again.');
         return;
       }
@@ -44,7 +45,7 @@ export default function GoogleConnectScreen({ navigation }: Props) {
       setError(null);
       (async () => {
         try {
-          await GoogleAuthService.exchangeCodeForTokens(code, redirectUri, request?.codeVerifier);
+          await GoogleAuthService.exchangeCodeForTokens(code, redirectUri, clientId, request?.codeVerifier);
           navigation.goBack();
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Authentication failed');
@@ -73,7 +74,8 @@ export default function GoogleConnectScreen({ navigation }: Props) {
       // Google rejects the token exchange with redirect_uri_mismatch if this
       // differs by even a trailing slash from the one used in the authorize call.
       const redirectUri = request?.redirectUri;
-      if (!redirectUri) {
+      const clientId = request?.clientId;
+      if (!redirectUri || !clientId) {
         setError('OAuth request not ready — try again.');
         return;
       }
@@ -81,7 +83,7 @@ export default function GoogleConnectScreen({ navigation }: Props) {
       setError(null);
       (async () => {
         try {
-          await GoogleAuthService.exchangeCodeForTokens(code, redirectUri, request?.codeVerifier);
+          await GoogleAuthService.exchangeCodeForTokens(code, redirectUri, clientId, request?.codeVerifier);
           navigation.goBack();
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Authentication failed');
