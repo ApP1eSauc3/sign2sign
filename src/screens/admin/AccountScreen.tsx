@@ -119,6 +119,12 @@ export default function AccountScreen({ navigation }: Props) {
             also need those removed, email the customer's privacy
             contact.
           </Text>
+          <Text style={styles.dangerBody}>
+            If you are the only admin, deleting this account locks
+            everyone out of the dashboard — new admin sign-up is
+            disabled, and a replacement account can only be created by
+            the system operator. Check with your team first.
+          </Text>
 
           {!confirmArmed ? (
             <TouchableOpacity

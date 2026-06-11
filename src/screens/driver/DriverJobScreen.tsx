@@ -134,7 +134,7 @@ export default function DriverJobScreen({ route, navigation }: Props) {
         { text: 'Skip', style: 'cancel' },
         {
           text: 'Send Email',
-          onPress: () => {
+          onPress: async () => {
             const subject = encodeURIComponent(
               `Sign ${completedJob.jobType === 'install' ? 'installed' : 'removed'} — ${completedJob.address}`
             );
@@ -147,9 +147,22 @@ export default function DriverJobScreen({ route, navigation }: Props) {
               `Sign: ${completedJob.signDescription}\n\n` +
               `Regards,\nSign2Sign`
             );
-            Linking.openURL(
-              `mailto:${completedJob.agentEmail}?subject=${subject}&body=${body}`
-            );
+            const mailtoUrl = `mailto:${completedJob.agentEmail}?subject=${subject}&body=${body}`;
+            // Drivers may have no mail account configured on the device —
+            // mailto: then fails silently and the agent never hears. Detect
+            // it and hand the driver the address instead of dropping the
+            // notice on the floor.
+            try {
+              const canOpen = await Linking.canOpenURL(mailtoUrl);
+              if (!canOpen) throw new Error('no mail handler');
+              await Linking.openURL(mailtoUrl);
+            } catch {
+              Alert.alert(
+                'No email app set up',
+                `This phone has no email account configured, so the notice was not sent. ` +
+                  `Let dispatch know, or contact the agent directly: ${completedJob.agentEmail}`
+              );
+            }
           },
         },
       ]

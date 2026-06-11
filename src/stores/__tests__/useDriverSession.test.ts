@@ -285,3 +285,52 @@ describe('helpers', () => {
     expect(useDriverSession.getState().completedCount()).toBe(2);
   });
 });
+
+describe('flushOfflineQueue — mark-complete failure surfacing', () => {
+  const mockFlush = OfflineQueueService.flush as jest.Mock;
+
+  // Mimic the real flush contract: call the handler, record success/failure.
+  function flushWithMarkCompleteOp(jobId: string) {
+    mockFlush.mockImplementation(async (handlers: {
+      onMarkComplete: (op: { jobId: string; routeCode: string }) => Promise<void>;
+    }) => {
+      try {
+        await handlers.onMarkComplete({ jobId, routeCode: '123456' });
+        return { succeeded: [jobId], failed: [] };
+      } catch {
+        return { succeeded: [], failed: [jobId] };
+      }
+    });
+  }
+
+  it('surfaces an expired/invalid code as a dispatch instruction', async () => {
+    flushWithMarkCompleteOp('job-1');
+    mockMarkComplete.mockRejectedValue(new Error('invalid_route_code'));
+
+    await useDriverSession.getState().flushOfflineQueue();
+
+    expect(useDriverSession.getState().markCompleteErrors['job-1']).toMatch(
+      /route code is no longer valid.*Tell dispatch/i
+    );
+  });
+
+  it('surfaces other failures as a will-retry message', async () => {
+    flushWithMarkCompleteOp('job-1');
+    mockMarkComplete.mockRejectedValue(new Error('network down'));
+
+    await useDriverSession.getState().flushOfflineQueue();
+
+    expect(useDriverSession.getState().markCompleteErrors['job-1']).toMatch(
+      /retry next time you go online/i
+    );
+  });
+
+  it('sets no error when the queued completion lands', async () => {
+    flushWithMarkCompleteOp('job-1');
+    mockMarkComplete.mockResolvedValue(undefined);
+
+    await useDriverSession.getState().flushOfflineQueue();
+
+    expect(useDriverSession.getState().markCompleteErrors['job-1']).toBeUndefined();
+  });
+});

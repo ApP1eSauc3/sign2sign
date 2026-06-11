@@ -301,7 +301,25 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
         }
       },
       onMarkComplete: async (op) => {
-        await JobPhotoService.markJobComplete(op.jobId, op.routeCode);
+        try {
+          await JobPhotoService.markJobComplete(op.jobId, op.routeCode);
+        } catch (err: unknown) {
+          // A queued mark-complete was previously shown to the driver as an
+          // optimistic success — a silent flush failure here means the admin
+          // never learns the job was done. Surface it so the job screen shows
+          // a retryable error instead of nothing.
+          const raw = err instanceof Error ? err.message : '';
+          set((s) => ({
+            markCompleteErrors: {
+              ...s.markCompleteErrors,
+              [op.jobId]:
+                raw === 'invalid_route_code'
+                  ? 'Could not sync this completed job — the route code is no longer valid. Tell dispatch which jobs you finished so they can record them.'
+                  : 'Could not sync this completed job. It will retry next time you go online.',
+            },
+          }));
+          throw err; // keep the op queued for the next flush
+        }
       },
     });
   },

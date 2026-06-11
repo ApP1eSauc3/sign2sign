@@ -172,3 +172,102 @@ describe('importJobs — error paths', () => {
     await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE)).rejects.toThrow(/More than 500 jobs/);
   });
 });
+
+// ── saveJobsToRoute — replace-incomplete semantics (migration 011) ──────────
+
+import { supabase } from '../supabaseClient';
+
+type SaveJob = Parameters<typeof GoogleSheetsService.saveJobsToRoute>[0][number];
+
+function makeImportJob(over: Partial<SaveJob> = {}): SaveJob {
+  return {
+    clientName: 'Harcourts',
+    agentName: 'Jane',
+    agentEmail: 'jane@example.com',
+    address: '42 Maple St',
+    signDescription: 'Corflute',
+    jobType: 'install',
+    latitude: -31.95,
+    longitude: 115.86,
+    sortOrder: 1,
+    ...over,
+  };
+}
+
+// Minimal PostgREST builder mock. delete().eq().eq() and select().eq() resolve
+// like thenable builders; insert() resolves directly.
+function installSupabase(opts: {
+  survivors?: { address: string; job_type: string }[];
+  deleteError?: { message: string } | null;
+  insertError?: { message: string; code?: string } | null;
+} = {}) {
+  const calls = { deleteFilters: [] as unknown[][], inserted: [] as unknown[] };
+  (supabase as { from?: unknown }).from = jest.fn(() => ({
+    delete: () => ({
+      eq: (...a: unknown[]) => ({
+        eq: (...b: unknown[]) => {
+          calls.deleteFilters.push([...a, ...b]);
+          return Promise.resolve({ error: opts.deleteError ?? null });
+        },
+      }),
+    }),
+    select: () => ({
+      eq: () => Promise.resolve({ data: opts.survivors ?? [], error: null }),
+    }),
+    insert: (records: unknown[]) => {
+      calls.inserted.push(...records);
+      return Promise.resolve({ error: opts.insertError ?? null });
+    },
+  }));
+  return calls;
+}
+
+describe('saveJobsToRoute — replace-incomplete semantics', () => {
+  it('deletes only incomplete jobs and inserts the import', async () => {
+    const calls = installSupabase();
+    const result = await GoogleSheetsService.saveJobsToRoute([makeImportJob()], 'route-1');
+
+    expect(calls.deleteFilters[0]).toEqual(['route_code_id', 'route-1', 'is_complete', false]);
+    expect(calls.inserted).toHaveLength(1);
+    expect(result).toEqual({ imported: 1, skippedCompleted: 0 });
+  });
+
+  it('skips rows matching a surviving completed job (case/whitespace-insensitive)', async () => {
+    const calls = installSupabase({
+      survivors: [{ address: '42 maple st', job_type: 'install' }],
+    });
+    const result = await GoogleSheetsService.saveJobsToRoute(
+      [
+        makeImportJob({ address: '  42 Maple St ' }),                       // duplicate of completed
+        makeImportJob({ address: '42 Maple St', jobType: 'removal' }),      // same address, other type — kept
+        makeImportJob({ address: '7 Oak Ave', sortOrder: 2 }),              // new — kept
+      ],
+      'route-1'
+    );
+
+    expect(result).toEqual({ imported: 2, skippedCompleted: 1 });
+    expect(calls.inserted).toHaveLength(2);
+  });
+
+  it('returns counts without inserting when every row is already completed', async () => {
+    const calls = installSupabase({ survivors: [{ address: '42 Maple St', job_type: 'install' }] });
+    const result = await GoogleSheetsService.saveJobsToRoute([makeImportJob()], 'route-1');
+
+    expect(result).toEqual({ imported: 0, skippedCompleted: 1 });
+    expect(calls.inserted).toHaveLength(0);
+  });
+
+  it('maps the P0004 duplicate-location trigger to admin language', async () => {
+    installSupabase({ insertError: { message: 'duplicate_location: …', code: 'P0004' } });
+    await expect(
+      GoogleSheetsService.saveJobsToRoute([makeImportJob()], 'route-1')
+    ).rejects.toThrow(/already assigned to another driver today/);
+  });
+
+  it('propagates a delete failure', async () => {
+    installSupabase({ deleteError: { message: 'permission denied' } });
+    await expect(
+      GoogleSheetsService.saveJobsToRoute([makeImportJob()], 'route-1')
+    ).rejects.toThrow(/Could not clear existing jobs: permission denied/);
+  });
+});
