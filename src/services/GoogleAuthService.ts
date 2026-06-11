@@ -17,6 +17,10 @@ const GOOGLE_CLIENT_ID_WEB = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB ?? '';
 
 const TOKEN_KEY = 'google_oauth_token';
 const REFRESH_KEY = 'google_oauth_refresh_token';
+// The OAuth client the tokens were issued under. Google ties a refresh token to
+// the exact client_id that minted it, so we persist it and reuse it on refresh.
+// On iOS this is the iOS client; on Electron/web it's the web client.
+const CLIENT_ID_KEY = 'google_oauth_client_id';
 
 const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets.readonly',
@@ -31,9 +35,16 @@ export const GoogleAuthService = {
     return AuthSession.makeRedirectUri({ scheme: 'sign2sign', path: 'oauth' });
   },
 
-  // Exchange an auth code for tokens and persist them
-  async exchangeCodeForTokens(code: string, redirectUri: string, codeVerifier?: string): Promise<void> {
-    const clientId = GOOGLE_CLIENT_ID_WEB || GOOGLE_CLIENT_ID_IOS;
+  // Exchange an auth code for tokens and persist them.
+  // `clientId` MUST be the same client the authorize request was built with
+  // (request.clientId) — Google rejects the exchange if the code was issued to a
+  // different client than the one presenting it.
+  async exchangeCodeForTokens(
+    code: string,
+    redirectUri: string,
+    clientId: string,
+    codeVerifier?: string,
+  ): Promise<void> {
     const params: Record<string, string> = {
       code,
       client_id: clientId,
@@ -52,6 +63,7 @@ export const GoogleAuthService = {
     if (!response.ok) throw new Error(json.error_description ?? 'Token exchange failed');
 
     await secureStorage.setItem(TOKEN_KEY, json.access_token);
+    await secureStorage.setItem(CLIENT_ID_KEY, clientId);
     if (json.refresh_token) {
       await secureStorage.setItem(REFRESH_KEY, json.refresh_token);
     }
@@ -62,7 +74,10 @@ export const GoogleAuthService = {
     const refreshToken = await secureStorage.getItem(REFRESH_KEY);
     if (!refreshToken) return null;
 
-    const clientId = GOOGLE_CLIENT_ID_WEB || GOOGLE_CLIENT_ID_IOS;
+    // Reuse the client the token was issued under; fall back for tokens stored
+    // before this key existed.
+    const clientId =
+      (await secureStorage.getItem(CLIENT_ID_KEY)) || GOOGLE_CLIENT_ID_WEB || GOOGLE_CLIENT_ID_IOS;
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -88,6 +103,7 @@ export const GoogleAuthService = {
   async disconnect(): Promise<void> {
     await secureStorage.removeItem(TOKEN_KEY);
     await secureStorage.removeItem(REFRESH_KEY);
+    await secureStorage.removeItem(CLIENT_ID_KEY);
   },
 
   // SCOPES exported so the auth request component can use them
