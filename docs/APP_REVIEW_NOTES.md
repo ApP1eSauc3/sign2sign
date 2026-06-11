@@ -2,8 +2,8 @@
 
 Pastes verbatim into **App Store Connect → App Information → App Review
 Information → Notes** when submitting Sign2Sign for review. Fill the
-three `<<…>>` placeholders before submitting. Total length is under
-2,000 characters (ASC's limit is 4,000).
+three `<<…>>` placeholders before submitting. Total length is ~2,600
+characters (ASC's limit is 4,000 — re-check with `wc -c` if you edit it).
 
 Two reasons this doc exists:
 1. The driver "codeless" auth pattern looks unusual to a reviewer; the
@@ -73,7 +73,7 @@ Data collection: photos, GPS, admin email, agent email. Full inventory
 in the privacy policy at https://app1esauc3.github.io/sign2sign/PRIVACY
 and reflected in the App Privacy questionnaire.
 
-Contact for review questions: bryanna@sign2sign.com.au
+Contact for review questions: bryanna@sign2site.com.au
 ```
 
 ---
@@ -82,7 +82,7 @@ Contact for review questions: bryanna@sign2sign.com.au
 
 | Placeholder | What to put |
 |---|---|
-| `<<DEMO_ADMIN_EMAIL>>` | A real, dedicated **reviewer-only** admin account on the prod Supabase project. Suggestion: `apple-reviewer@sign2sign.com.au`. Create it via the admin API (with `email_confirm: true`) — the dashboard signup flow is now disabled. |
+| `<<DEMO_ADMIN_EMAIL>>` | A real, dedicated **reviewer-only** admin account on the prod Supabase project. Suggestion: `apple-reviewer@sign2site.com.au`. Create it via the admin API (with `email_confirm: true`) — the dashboard signup flow is now disabled. |
 | `<<DEMO_ADMIN_PASSWORD>>` | A strong password matching the policy now enforced (≥12 chars, lower + upper + digits + symbols). Do NOT reuse Bryanna's password. Rotate after each Apple review cycle. |
 | `<<DEMO_DRIVER_CODE>>` | A live 6-digit code for one of today's driver slots on the reviewer-only route. **Codes expire daily**, so this needs to be refreshed at the moment of submission and any resubmission. Easiest pattern: generate the reviewer's driver code immediately before clicking "Submit for Review", then again before each resubmission. Apple's review usually happens within 24–48 hours of submission; if the code expires during review, they'll reject and you regenerate. |
 

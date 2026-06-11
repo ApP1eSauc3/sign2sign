@@ -1,6 +1,6 @@
 # Sign2Sign
 
-Field operations app for sign installation and removal crews. Drivers use a codeless mobile app to work through daily job routes, capture GPS-tagged photos, and mark jobs complete. Admins manage routes, generate daily codes, and import jobs from Google Sheets — on iOS or Windows.
+Field operations app for sign installation and removal crews. Drivers use a codeless mobile app to work through daily job routes, capture GPS-tagged photos, and mark jobs complete. Admins manage routes, generate daily codes, and import jobs from Google Sheets — on iOS or desktop (Electron).
 
 ---
 
@@ -32,7 +32,7 @@ Sign2Sign solves a coordination problem for sign installation companies: crews n
 | Role | Platform | Auth method |
 |---|---|---|
 | Driver | iOS (Expo Go / standalone) | 6-digit daily code — no account required |
-| Admin | iOS + Windows (Electron) | Email/password via Supabase Auth |
+| Admin | iOS + desktop (Electron — macOS shipped in v1.0.0; Windows deferred until a code-signing cert exists) | Email/password via Supabase Auth |
 
 Key constraints driving every architectural decision:
 - Drivers may have poor connectivity mid-route — offline queue handles this
@@ -98,30 +98,35 @@ sign2sign/
 ├── assets/                         App icons and splash (Human-owned)
 ├── supabase/
 │   ├── functions/
-│   │   └── validate-code/index.ts       IP-throttled Edge Function wrapping validate_route_code()
+│   │   ├── validate-code/index.ts           IP-throttled Edge Function wrapping validate_route_code()
+│   │   └── delete-admin-account/index.ts    JWT-verified in-app account deletion (Apple 5.1.1(v))
 │   └── migrations/
-│       ├── 006_rate_limit_codes.sql     Per-client rate limit, anon SELECT revoke on jobs, validate/recover RPCs
-│       ├── 007_prune_code_attempts.sql  Periodic prune of code_attempts table
-│       ├── 008_revoke_rpc_from_anon.sql Forces drivers through the Edge Function only
-│       └── 009_storage_policies.sql     Locks down the job-photos bucket
+│       ├── 001_initial.sql                  Committed baseline (prod dump; captures dashboard-era 001–005)
+│       ├── 006_rate_limit_codes.sql         Per-client rate limit, anon SELECT revoke on jobs, validate/recover RPCs
+│       ├── 007_prune_code_attempts.sql      Periodic prune of code_attempts table (24h, pg_cron)
+│       ├── 008_revoke_rpc_from_anon.sql     Forces drivers through the Edge Function only
+│       ├── 009_storage_policies.sql         Locks down the job-photos bucket
 │       ├── 010_revoke_validate_route_code_from_public.sql  Closes PUBLIC execute bypass left by 008
-│       └── 001_initial.sql                  Committed baseline (prod dump; captures dashboard-era 001–005)
+│       ├── 011_admin_delete_incomplete_jobs.sql  Admin DELETE on incomplete jobs (makes re-import real)
+│       └── 012_offline_sync_grace.sql       24h finish-work grace for expired codes (offline queue)
 └── src/
     ├── data/
     │   └── SignJob.ts              SignJob, DriverSession, AppMode, JobUploadState
     ├── services/
     │   ├── supabaseClient.ts       Supabase client singleton
-    │   ├── AuthService.ts          Admin sign in/out/session
+    │   ├── AuthService.ts          Admin sign in/out/session + account deletion
     │   ├── RouteCodeService.ts     Driver session load + admin code generation
     │   ├── JobPhotoService.ts      Camera capture, Storage upload, mark complete
     │   ├── GoogleSheetsService.ts  Job import from Google Sheets
     │   ├── GoogleAuthService.ts    OAuth2 token management for Sheets
+    │   ├── RouteService.ts         Driving-route optimisation (Google Directions; falls back to straight lines)
     │   └── OfflineQueueService.ts  AsyncStorage queue for offline operations
     ├── stores/
     │   ├── useAppStore.ts          AppMode — root navigation signal
     │   └── useDriverSession.ts     Driver session, upload state machine, offline sync
     ├── utils/
     │   ├── colors.ts               Brand colour tokens (single source of truth)
+    │   ├── secureStorage.ts        SecureStore / keychain adapter
     │   └── useNetworkStatus.ts     Network state hook
     ├── navigation/
     │   ├── AppNavigator.tsx        Root — branches on AppMode
@@ -134,10 +139,12 @@ sign2sign/
         │   ├── AdminLoginScreen.tsx
         │   ├── AdminDashboardScreen.tsx
         │   ├── AdminRouteDetailScreen.tsx
+        │   ├── AccountScreen.tsx        Privacy link + in-app account deletion
         │   └── GoogleConnectScreen.tsx
         └── driver/
             ├── DriverCodeScreen.tsx
             ├── DriverRouteScreen.tsx
+            ├── DriverMapScreen.tsx      Native map route view (web stub keeps react-native-maps out of Electron)
             └── DriverJobScreen.tsx
 ```
 
@@ -181,21 +188,24 @@ Individual sign installation or removal tasks. Imported from Google Sheets and l
 | `photo_gps_lng` | float | GPS at upload time |
 | `photo_timestamp` | timestamptz | Timestamp at upload time |
 
-### RLS Policies
+### RLS and grants — what the anon key can actually do
 
-All four migrations contribute policies. The anon key (drivers) can only satisfy the public policies. Admin policies require a valid Supabase Auth session (`auth.role() = 'authenticated'`). The service role key is never shipped in the app.
+Policies alone don't tell the story: migrations 006/008/010 revoked grants on
+top of them, so several baseline policies are unreachable for anon. Current
+model (the table in `the services layer guide` is canonical):
 
-| Policy | Table | Operation | Who |
-|---|---|---|---|
-| `Public read active codes` | `route_codes` | SELECT | Anon (drivers) — `is_active AND expires_at > now()` |
-| `Public read jobs for active codes` | `jobs` | SELECT | Anon (drivers) — job's code is active and non-expired |
-| `Drivers can update photo fields for active jobs` | `jobs` | UPDATE | Anon — job belongs to active code; photo fields + `is_complete` only |
-| `Admins can insert jobs` | `jobs` | INSERT | Authenticated |
-| `Admins can update jobs` | `jobs` | UPDATE | Authenticated |
-| `Admins can insert route codes` | `route_codes` | INSERT | Authenticated |
-| `Admins can update route codes` | `route_codes` | UPDATE | Authenticated |
-| `Admins can read all route codes` | `route_codes` | SELECT | Authenticated — includes inactive/historical (for audit) |
-| `Admins can read all jobs` | `jobs` | SELECT | Authenticated — survives code expiry (route detail screen works next morning) |
+| Access | Anon (drivers) | Authenticated (admins) |
+|---|---|---|
+| Read `route_codes` | Only `id, driver_slot, created_date, expires_at, is_active` (the `code` column is grant-revoked, 006) | ✅ all, incl. historical |
+| Read `jobs` | ❌ table SELECT revoked (006) — job data reaches drivers only through `validate_route_code()` via the `validate-code` Edge Function | ✅ all — survives code expiry (route detail works next morning) |
+| Write `jobs` photo fields | ✅ driver UPDATE policy, gated on the job's code being live (24h sync grace once migration 012 is pushed) | ✅ |
+| Set `jobs.is_complete` | ✅ only via `complete_job()` RPC (SECURITY DEFINER, row lock, photo gate, idempotent) | — admins never write `is_complete` |
+| INSERT `jobs` | ❌ | ✅ |
+| DELETE `jobs` | ❌ | ✅ incomplete jobs only (migration 011 — completion evidence is not deletable from the app) |
+| Write `route_codes` | ❌ | ✅ INSERT/UPDATE |
+| Execute `validate_route_code()` | ❌ revoked from anon (008) and PUBLIC (010) — Edge Function only | — |
+
+The service role key is never shipped in the app; only the Edge Functions hold it.
 
 ---
 
@@ -213,17 +223,17 @@ All four migrations contribute policies. The anon key (drivers) can only satisfy
 Drivers have no Supabase Auth accounts. The 6-digit code is the credential.
 
 1. Driver opens app → selects Driver mode → enters 6-digit code
-2. `RouteCodeService.loadSession(code)` queries `route_codes` with the anon key
-3. RLS validates the code is active and non-expired
-4. On match, the full job list is returned and the Driver stack renders
+2. `RouteCodeService.loadSession(code)` POSTs `{ code, client_id }` to the `validate-code` Edge Function (the device's anonymous `client_id` UUID feeds the per-device rate limit)
+3. The function IP-throttles, then invokes the `validate_route_code()` RPC with the service-role key — direct anon access to that RPC was revoked in migrations 008/010, and anon cannot read `route_codes.code` or `jobs` at all
+4. A valid, unexpired code returns the full session payload (slot + job list) and the Driver stack renders; an invalid/expired code returns `{ session: null }`
 5. `supabase.auth` is never called for drivers
 
 ### Daily code generation
 
-1. Admin taps "Generate Codes" on the dashboard
+1. Admin taps "Generate Codes" on the dashboard (a confirm warns that codes drivers are currently using stop working immediately)
 2. `RouteCodeService.generateDailyCodes([1, 2, 3, ...])` runs per slot:
-   - Deactivates any existing active code for that slot today
-   - Inserts a new 6-digit code with expiry at 06:00 tomorrow
+   - Deactivates any **live** code for that slot (filtered by expiry, not by date — `created_date` is a local business-day label; already-expired codes are left alone so the offline-sync grace window keeps working)
+   - Inserts a new 6-digit code (crypto RNG) with expiry at 06:00 tomorrow
    - Retries up to 5 times on a 6-digit collision (Postgres constraint `23505`)
 3. Admin shares codes with drivers verbally or via the dashboard display
 
@@ -236,7 +246,7 @@ Drivers have no Supabase Auth accounts. The 6-digit code is the credential.
 1. Admin connects Google account via `GoogleConnectScreen`
 2. Pastes a Google Sheets URL containing job data
 3. `GoogleSheetsService.importJobs(sheetId)` fetches rows via Sheets API v4
-4. Caller writes the resulting `SignJob[]` to Supabase, linked to a `route_code_id`
+4. `saveJobsToRoute()` uses **replace-incomplete** semantics: the route's incomplete jobs are deleted (migration 011 scopes the DELETE policy to `is_complete = false`), rows matching an already-completed job are skipped, the rest are inserted — re-importing a corrected sheet never touches completion evidence
 5. `agent_email` is captured at import time — no manual lookup later
 
 ### Photo Capture and Upload
@@ -266,8 +276,9 @@ If the device has no connectivity when a driver confirms a photo:
 
 1. `OfflineQueueService.enqueue()` persists the upload operation to AsyncStorage
 2. Upload state is set to `failed` with message: `"No connection — photo queued and will upload automatically when online."`
-3. On next session load (when connectivity returns), `flushOfflineQueue()` replays queued operations
-4. Retaking a photo calls `OfflineQueueService.remove(jobId, 'upload')` first — prevents the old queued photo uploading after the driver retakes
+3. `flushOfflineQueue()` replays queued operations on three triggers: connectivity returning mid-session (`OfflineBanner`), a successful session load, and **mounting the driver code screen** — the last one matters because queued ops carry their own route code and must be able to sync even when the code has expired and no session can be opened
+4. Server-side, finish-work writes (`complete_job`, photo-field UPDATE, photo recovery) accept codes up to 24 hours past expiry (migration 012) — a driver who went home offline only has to open the app the next morning for yesterday's evidence to land. Expired codes still cannot open sessions or read job data
+5. Retaking a photo calls `OfflineQueueService.remove(jobId, 'upload')` first — prevents the old queued photo uploading after the driver retakes
 
 If the device has no connectivity when a driver taps "Mark Complete":
 
@@ -308,6 +319,14 @@ Create `.env.local` in the project root. This file is gitignored — never commi
 ```env
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+# Optional — Google Sheets import (see docs/GOOGLE_OAUTH_SETUP.md)
+EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS=...
+EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB=...
+
+# Optional — Google Directions for the driver map's optimised route.
+# Without it, RouteService falls back to straight-line connections.
+EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=...
 ```
 
 The service role key is never used in the app. Admin write access is controlled via Supabase Auth sessions and RLS policies.
@@ -336,18 +355,18 @@ npm run android
 npm run web:dev
 ```
 
-### Electron (Windows desktop admin)
+### Electron (desktop admin)
 
-Build the web output first, then launch Electron:
-
-```bash
-npm run electron
-```
-
-For development (skip the build step, uses last web build):
+Launch against the last web build (run `npm run web` first if `dist/` is stale):
 
 ```bash
 npm run electron:dev
+```
+
+For a packaged, signed, notarized macOS build see `the Electron handover doc`:
+
+```bash
+npm run electron:build:mac
 ```
 
 ---
@@ -360,14 +379,14 @@ npm run electron:dev
 eas build --platform ios
 ```
 
-### Windows (Electron)
+### Desktop (Electron)
 
 ```bash
-npm run web           # exports to dist/
-npx electron .        # or package with electron-builder
+npm run electron:build:mac   # macOS — exports web, packages, signs, notarizes, staples
+npm run electron:build:win   # Windows — configured but DEFERRED: no code-signing cert yet
 ```
 
-Admin on iOS and admin on Windows run identical React code — only the shell differs.
+Admin on iOS and admin on desktop run identical React code — only the shell differs.
 
 ---
 
@@ -379,7 +398,8 @@ All user-facing error strings are listed here. Find their source in the referenc
 
 | Error message | Cause | Source |
 |---|---|---|
-| `Invalid or expired code. Try again.` | Code not found in `route_codes`, already expired, or `is_active = false` | `useDriverSession.ts` — `loadSession` |
+| `Invalid or expired code. Try again.` | Edge Function returned `{ session: null }` — code not found, expired, or `is_active = false` | `useDriverSession.ts` — `loadSession` |
+| `Too many attempts. Wait a minute and try again.` | HTTP 429 from either the Edge Function's per-IP throttle or the RPC's per-device limit (5 failed attempts / 60s) | `RouteCodeService.ts` — `loadSession`, surfaced verbatim by the store |
 | `Connection problem — check your signal and try again.` | Network or server error during code lookup (not an invalid code) | `useDriverSession.ts` — `loadSession` |
 
 ### Photo Capture
@@ -419,8 +439,10 @@ All user-facing error strings are listed here. Find their source in the referenc
 
 | Code | Meaning | Handling |
 |---|---|---|
-| `PGRST116` | No rows returned from `.single()` — code is invalid or expired | `RouteCodeService.loadSession` returns `null`; store sets "Invalid or expired code" message |
 | `23505` | Unique constraint violation on `code` column during insert | `RouteCodeService.generateDailyCodes` retries with a new 6-digit value (up to 5 attempts) |
+| `P0002` | `photo_key` write-once trigger — an earlier upload reached the DB but the response was lost | `JobPhotoService.uploadPhoto` recovers the canonical photo via `recover_existing_photo()` and reports success |
+| `P0004` | Duplicate-location trigger — address + job type already assigned to another driver today | `GoogleSheetsService.saveJobsToRoute` maps to a plain-English import error |
+| `P0005` | Per-device rate limit inside `validate_route_code()` | Reaches the client as HTTP 429 → "Too many attempts" message |
 
 ---
 
@@ -428,7 +450,7 @@ All user-facing error strings are listed here. Find their source in the referenc
 
 The full design system lives in `src/the screens layer guide` and `src/utils/colors.ts`. Key principles:
 
-- **Brand**: Two colours only — white and `#147EC4` (sky blue). No gradients, no third colour.
+- **Brand**: Two colours only — white and `#0CAAEC` (logo blue, sampled from the Sign2Site logo 2026-05-31). No gradients, no third colour.
 - **Contrast**: WCAG AAA (7:1) minimum. `colors.bg` + `colors.textPrimary` achieves 16:1. Direct sunlight reduces effective contrast by ~50%.
 - **Touch targets**: 56pt minimum (bare fingers), 64pt for primary actions (gloved hands).
 - **Admin mode**: Light background, blue accents.
@@ -446,7 +468,7 @@ Before editing any file, read the `the project guide` in that layer's directory.
 
 ### Adding a database column
 
-1. Create a new migration file with the next sequence number (next free: `011_add_column.sql`) — never edit pushed migrations
+1. Create a new migration file with the next sequence number (next free: `013_*.sql`; `011_`/`012_` are on disk awaiting `db push`) — never edit pushed migrations
 2. Update the relevant type in `src/data/`
 3. Update any service that reads or writes that table
 4. Run `supabase db push`
