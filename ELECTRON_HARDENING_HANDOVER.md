@@ -8,6 +8,13 @@
 
 This document supersedes the original Haiku tasking sheet (see `## Implementation history` at the end). What you need to ship the next release is at the top. The Electron hardening content (the bulk of this file) is unchanged from v1.0.0; the project-wide status section was added 2026-05-27.
 
+> **Before trusting any claim in this file:** read `CLAUDE.md → Documentation
+> Integrity Rules`. Deployed-state claims are only as good as their
+> verification date; commands with filenames (e.g. `gh release create`) must
+> be checked against the actual build output before running. Both rules exist
+> because this file has burned sessions twice (the never-deployed security
+> model, the stale release filenames).
+
 ---
 
 ## What changed 2026-05-27 (audit + cleanup)

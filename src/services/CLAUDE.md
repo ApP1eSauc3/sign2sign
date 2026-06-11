@@ -179,6 +179,49 @@ The service role key is **never shipped in the app**. Edge Function (`supabase/f
 
 ---
 
+## RLS denials are SILENT — verify the policy exists before writing the call
+
+A write or delete filtered out by RLS does **not** error. It affects 0 rows
+and returns `{ error: null }`. The pre-011 `saveJobsToRoute` shipped a
+delete that "succeeded" on every run while deleting nothing — for months.
+
+Before writing any INSERT / UPDATE / DELETE service call:
+
+1. Grep the migrations for a policy covering that **table + operation + role**
+   (e.g. `for delete` ... `to authenticated`). No policy → your call is a no-op.
+2. If the row count matters, check it: `.select()` after the mutation, or use
+   a SECURITY DEFINER RPC that returns an explicit result like `complete_job()`.
+
+```typescript
+// ❌ — "worked" forever while RLS silently filtered every row
+const { error } = await supabase.from('jobs').delete().eq('route_code_id', id);
+if (error) throw ...;   // error is null; nothing was deleted
+
+// ✅ — policy verified in migrations (011: DELETE, authenticated, is_complete = false)
+//      and the call's scope matches the policy's scope
+const { error } = await supabase.from('jobs').delete()
+  .eq('route_code_id', id).eq('is_complete', false);
+```
+
+---
+
+## Dates and timezones — local business days vs absolute instants
+
+Perth is UTC+8. `new Date().toISOString().split('T')[0]` is the **UTC**
+date — between 00:00 and 08:00 local it is *yesterday*. This bug stamped
+route codes with the wrong `created_date`, hid live codes from the
+dashboard, and let regeneration miss them (two live credentials per slot).
+
+- **Business-day labels** (`created_date`): use `localDateString()` in
+  `RouteCodeService.ts` (local-time components, zero-padded).
+- **Validity / expiry / ordering**: never compare date strings — use the
+  `timestamptz` column against `now()` (or an ISO instant). A code is "live"
+  because `is_active && expires_at > now()`, never because of its date label.
+- Filtering or deactivating by `created_date` is a bug magnet — pre-fix rows
+  may carry UTC-shifted labels. Filter on liveness.
+
+---
+
 ## Never read schema field names from memory — read the migration
 
 Always read the migrations in `supabase/migrations/` before writing a Supabase query predicate (`001_initial.sql` baseline + `006_–012_` applied on top). Never guess column names. The TypeScript field mapping is in `src/data/CLAUDE.md`.
@@ -245,3 +288,6 @@ const json = await fetch(url).then((r) => r.json());
 - `.then()` chains — use `async/await` throughout
 - Guessing column names — always read the migration first
 - Direct Supabase calls from screens — always go through a service
+- Assuming a mutation happened because `error` is null — RLS no-ops are silent (see "RLS denials are SILENT" above)
+- `toISOString().split('T')[0]` for a business date — that's the UTC date, wrong before 08:00 Perth time
+- Trusting a doc's claim about deployed state — verify against `supabase migration list` / the live DB

@@ -28,6 +28,12 @@ import { supabase } from '../services/supabaseClient';  // go through a service
 
 ## Zustand canonical pattern
 
+> The snippet below is **illustrative** — field names and signatures drift
+> from the real store. `src/stores/useDriverSession.ts` is the source of
+> truth for actual shapes (e.g. `isLoadingSession`, `loadSession` returning
+> `boolean`, `markCompleteErrors`). Per CLAUDE.md → Documentation Integrity
+> Rules: when pattern doc and code disagree, read the code.
+
 ```typescript
 import { create } from 'zustand';
 import { JobUploadState, DriverSession } from '../data/SignJob';

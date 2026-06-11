@@ -1,5 +1,13 @@
 # Sign2Sign — Codebase Status
 
+> **Status discipline** (see CLAUDE.md → Documentation Integrity Rules):
+> "✅ Built" means the code exists in this repo. "✅ Deployed" means it was
+> verified live, and the row must say **when and how** (CLI output, Management
+> API query, curl). The two have diverged before — the 2026-05-29 incident was
+> an entire documented security model that had never been deployed. Re-verify
+> any deployed-state claim older than the last schema or infra change before
+> building on it.
+
 ## Skills
 
 | Name | Trigger | Covers |

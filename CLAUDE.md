@@ -40,6 +40,58 @@ Who owns what. Claude must not edit **Human** files without an explicit instruct
 
 ---
 
+## Documentation Integrity Rules
+
+Two audits (2026-05-29 deploy gap, 2026-06-10 doc/code drift) traced every
+incident to the same failure classes. These rules exist so they don't recur.
+Read this before editing ANY md file.
+
+### 1. Single source of truth — facts live in one file, everywhere else links
+
+| Fact | Canonical source | Never restate in |
+|---|---|---|
+| RLS policies, grants, RPC access | `src/services/CLAUDE.md` RLS table | README (link or summarise WITH a pointer) |
+| Colour values / brand hex | `src/utils/colors.ts` | README, screens — always `colors.*`, prose says "see colors.ts" |
+| npm script names | `package.json` | Copy-paste from `package.json` at write time; never recall from memory (`npm run electron` never existed but lived in two docs) |
+| Release artifact filenames | `electron-builder.yml` (`artifactName`) | Handover commands — check `ls release/` before writing a `gh release` command |
+| Deployed schema state | `supabase migration list` output | Any doc claiming "applied to prod" |
+| Test counts | `npm test` output | Docs may state a count only with a date; the run is the truth |
+| Driver auth flow | `RouteCodeService.loadSession` + `src/services/CLAUDE.md` | README auth section drifted to the revoked pre-006 model once already |
+
+### 2. Deployed-state claims need evidence, not intention
+
+This repo's docs are polished enough to be mistaken for reality. A claim
+that something is deployed/enabled/live must carry **(a)** a date and
+**(b)** how it was verified (CLI output, Management API query, curl).
+"✅ Built" and "✅ Deployed" are different facts — CODEBASE_STATUS tracks
+them separately. When you read a deployed-state claim older than the last
+schema or infra change, re-verify before building on it.
+
+### 3. Never promise an operation nothing implements
+
+PRIVACY.md shipped "codes archived 30 days then deleted" and "photos
+deleted after 24 months" with no implementing mechanism anywhere. Any
+data-lifecycle statement (retention, deletion, archival, expiry) in a
+user-facing doc must name the thing that does it (migration number,
+pg_cron job, RPC) — if you can't name it, write what actually happens or
+build the mechanism first.
+
+### 4. External facts get checked at write time
+
+Email addresses (MX records — `bryanna@sign2sign.com.au` had none),
+URLs (curl the status code), fee schedules, ASC field limits, character
+counts (`wc -c`, the "under 2,000" claim was off by 30%). Verify, then
+date the claim in the doc.
+
+### 5. When code and docs disagree, neither wins by default
+
+Read the third source: the migration, the live DB, the actual API
+response. The 2026-06-10 re-import bug existed because docs said "delete
+then insert", code did it, and **prod RLS silently ignored the delete** —
+both doc and code were wrong about reality.
+
+---
+
 ## Reference Repos
 
 Before settling on any non-trivial implementation, validate the pattern against these sources.
