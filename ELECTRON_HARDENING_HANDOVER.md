@@ -2,7 +2,7 @@
 
 **Status:** v1.0.0 **shipped** (2026-05-26 → 2026-05-27). Notarized, stapled, published to GitHub Releases. Auto-updater channel live. Every original Electron hardening task plus every originally-out-of-scope item is implemented.
 
-**Last touched:** 2026-05-29 — deploy + repo coherence pass (see "What changed 2026-05-29" below). The current authoritative Open blockers list is at the end of that section.
+**Last touched:** 2026-06-10 — audit + workflow-blindspot fix pass (see "What changed 2026-06-10" below). The authoritative Open blockers list is the 2026-05-29 list **as amended by the 2026-06-10 section** (two items closed, two added).
 
 **Release:** https://github.com/ApP1eSauc3/sign2sign/releases/tag/v1.0.0
 
@@ -45,8 +45,59 @@ Triggered by a "what's left before publishable / any hallucinations?" review. Th
 2. ~~**Zero test coverage.**~~ **Partially addressed 2026-05-29.** `ts-jest` installed (`npm test`). 36 tests cover the photo gate (`canMarkComplete`), the upload state machine, `loadSession` seeding + error mapping (429/null/network) via `useDriverSession`, and `GoogleSheetsService.importJobs` (column mapping, date filter, job-type detection, error paths). Still uncovered: screen-level flows (`@testing-library/react-native` + `jest-expo` deferred) and the offline-queue `flush` paths.
 3. **Brand assets still placeholders.** `assets/icon.png` and the splash are Expo defaults. CLAUDE.md tags `assets/` as Human-owned.
 4. **Brand blue hex unconfirmed.** Currently the `#147EC4` estimate in `src/utils/colors.ts`. Confirm by inspecting sign2site.com.au CSS.
-5. **Google Client IDs in `.env.local`.** Required for the Sheets import flow. Status uncertain without reading the file (Human-owned).
+5. ~~**Google Client IDs in `.env.local`.**~~ **RESOLVED** — the 2026-06-02 security-audit repo scan (R6) confirmed `.env.local` holds the Google IDs alongside the anon key + Supabase URL.
 6. **Windows build deferred.** No Windows code-signing cert. If a Windows admin user is in scope, this becomes a blocker.
+
+---
+
+## What changed 2026-06-10 (audit + workflow-blindspot fixes)
+
+Triggered by a "check for faults, errors, hallucinations and workflow blindspots
+for both admin and driver" pass over the handover + all md files, verified
+against code, migrations, live endpoints, and DNS. `tsc` and the 36-test jest
+suite were green before and after.
+
+### Code fixes shipped (uncommitted at time of writing)
+
+| Finding | Fix |
+|---|---|
+| **`created_date` was the UTC date** (`toISOString().split('T')[0]`). Perth is UTC+8 — codes generated before 08:00 local were stamped with yesterday's date, vanished from `getActiveCodes` at 08:00, and dodged the regeneration deactivation filter → two live codes per slot, one invisible. | `RouteCodeService`: `localDateString()` for `created_date`; deactivation now filters on liveness (`is_active` + `expires_at > now()`), not date; `getActiveCodes` filters on liveness too. Self-heals existing UTC-shifted rows on next regeneration. |
+| **Route re-import was broken.** `saveJobsToRoute`'s delete was a silent RLS no-op (no DELETE policy on `jobs` existed), so re-importing a corrected sheet always died on the `P0004` duplicate-location trigger. | Migration **`011_admin_delete_incomplete_jobs.sql`** (DELETE policy scoped to `is_complete = false`) + replace-incomplete semantics in `saveJobsToRoute` (completed jobs survive and matching import rows are skipped; P0004 mapped to plain English). Dashboard shows an import summary. |
+| **Offline queue stranded work after code expiry.** Queued (optimistically-confirmed) completions/photos could never sync once the code expired: every server write required `expires_at > now()` and the flush only ran after a successful session load. Silent data loss. | Migration **`012_offline_sync_grace.sql`** (24h finish-work grace on `complete_job`, `recover_existing_photo`, driver UPDATE policy; `validate_route_code` stays strict) + flush now also runs on DriverCodeScreen mount (works without a session) + queued mark-complete failures surface in the job screen instead of vanishing. |
+| `mailto:` completion notice failed silently on devices with no mail account. | `canOpenURL` check + fallback alert giving the driver the agent's address. |
+| "Generate Today's Codes" gave no hint it kicks mid-route drivers. | Confirm dialog now warns explicitly. |
+| Last admin could self-delete with signup disabled → total lockout. | AccountScreen danger copy now warns; recovery is operator-only by design. |
+
+**Migrations `011_` + `012_` are on disk, NOT pushed.** The app code degrades
+gracefully until they land, but re-import and overnight offline sync need them.
+Apply with `supabase db push` after review.
+
+### Doc corrections (hallucinations / stale claims found and fixed)
+
+README driver-auth section + RLS table (still described the pre-006 direct
+anon model), brand hex (`#147EC4` → `#0CAAEC`), `npm run electron` (script
+doesn't exist → `electron:dev`), PGRST116 error-catalogue remnant, missing
+tree entries (`RouteService`, `DriverMapScreen`, `AccountScreen`,
+`delete-admin-account`), undocumented `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`,
+"Windows admin" framing (macOS shipped; Windows deferred); this handover's
+release-flow filenames (contradicted the resolved gotcha #3); APP_REVIEW_NOTES
+character-count claim (~2,600, not <2,000); PRIVACY.md retention promises that
+nothing implements (30-day code archival, 24-month auto-deletion) rewritten to
+match reality, and the "code not stored client-side" claim corrected for the
+offline queue. PRIVACY.md "Last updated" bumped to 2026-06-10 — **republish
+the GH Pages copy**.
+
+### New blockers (add to the list below)
+
+16. ~~**Contact email domain is likely dead.**~~ **RESOLVED same day** —
+    `sign2sign.com.au` had no MX records; all contact addresses switched to
+    `bryanna@sign2site.com.au` (Outlook MX confirmed) in PRIVACY.md,
+    APP_REVIEW_NOTES, and the AdminLoginScreen placeholder. Remaining:
+    **republish the GH Pages policy** and confirm Bryanna's mailbox exists on
+    that domain before submission.
+17. ~~**Push migrations 011 + 012.**~~ **DONE same day** — pushed via
+    `supabase db push` and live-verified (see the verification log in the
+    section above).
 
 ---
 
@@ -146,9 +197,11 @@ source electron-build.env           # loads APPLE_API_* env vars (gitignored fil
 npm run electron:build:mac          # exports web → packages → signs → notarizes → staples → DMGs
 ```
 
-The build produces 5 artifacts in `release/`:
-- `Sign2Sign Admin-<version>-arm64.dmg` + `.blockmap`
-- `Sign2Sign Admin-<version>.dmg` + `.blockmap`
+The build produces 5 artifacts in `release/` (hyphenated since the
+`mac.artifactName` fix on 2026-05-27 — v1.0.0's artifacts had spaces, the
+next release's will not):
+- `Sign2Sign-Admin-<version>-arm64.dmg` + `.blockmap`
+- `Sign2Sign-Admin-<version>.dmg` + `.blockmap`
 - `latest-mac.yml` (the auto-updater manifest)
 
 ### Publishing a release to GitHub
@@ -158,13 +211,17 @@ The build produces 5 artifacts in `release/`:
 ```bash
 V=1.0.1                              # whatever the next version is
 gh release create v$V \
-  "release/Sign2Sign Admin-$V-arm64.dmg" \
-  "release/Sign2Sign Admin-$V-arm64.dmg.blockmap" \
-  "release/Sign2Sign Admin-$V.dmg" \
-  "release/Sign2Sign Admin-$V.dmg.blockmap" \
+  "release/Sign2Sign-Admin-$V-arm64.dmg" \
+  "release/Sign2Sign-Admin-$V-arm64.dmg.blockmap" \
+  "release/Sign2Sign-Admin-$V.dmg" \
+  "release/Sign2Sign-Admin-$V.dmg.blockmap" \
   "release/latest-mac.yml" \
   --title "v$V" --notes "…"
 ```
+
+(Glance at `ls release/` before running — if the filenames don't match the
+command exactly, the upload 404s. This command was updated 2026-06-10; the
+previous version still listed the pre-fix space-separated names.)
 
 As of 2026-05-27 the `mac.artifactName` durable fix is applied in `electron-builder.yml`, so DMG filenames and `latest-mac.yml` already agree — no manual `sed` step needed. The historical gotcha is preserved below as #3 for context.
 

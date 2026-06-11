@@ -8,7 +8,7 @@ This file defines what to test and what not to waste time on. A runner is instal
 
 - **Runner:** `ts-jest` (node environment) — config in `jest.config.js`.
 - **Run:** `npm test` (or `npm run test:watch`).
-- **Coverage:** `src/stores/__tests__/useDriverSession.test.ts` and `src/services/__tests__/GoogleSheetsService.test.ts` (36 tests). These are the canonical, *accurate* examples — prefer them over the illustrative snippets further down, which predate the implementation and may not match current signatures.
+- **Coverage:** `src/stores/__tests__/useDriverSession.test.ts` and `src/services/__tests__/GoogleSheetsService.test.ts` (44 tests — 36 from 2026-05-29, plus 8 added 2026-06-10 covering `saveJobsToRoute` replace-incomplete semantics and offline-flush mark-complete error surfacing). These are the canonical, *accurate* examples — prefer them over the illustrative snippets further down, which predate the implementation and may not match current signatures.
 
 ## Setup (already done)
 

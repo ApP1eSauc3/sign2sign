@@ -30,7 +30,7 @@ Install new skills via: `claude /plugin install <skill>@<marketplace>`
 | `useDriverSession` store | ✅ Built | Full state machine — session, uploadStates, canMarkComplete |
 | `useAppStore` | ✅ Built | AppMode switching |
 | Design system (`colors.ts`) | ✅ Built | Full token set, brand blue, status colours |
-| Supabase schema (on-disk) | ✅ Built | `001_initial.sql` is the committed baseline (`supabase db dump --schema public` of prod, captures everything 001–005 created via dashboard). Migrations `006`–`010` are committed AND applied to prod (`supabase db push`, 2026-05-29). Migration history table repaired so 002–005 are marked reverted (their objects live in the baseline). A fresh deploy is now fully reconstructible from git. |
+| Supabase schema (on-disk) | ✅ Built | `001_initial.sql` is the committed baseline (`supabase db dump --schema public` of prod, captures everything 001–005 created via dashboard). Migrations `006`–`010` are committed AND applied to prod (`supabase db push`, 2026-05-29). **`011` (admin delete on incomplete jobs) and `012` (24h offline-sync grace) written, pushed, and live-verified 2026-06-10.** Migration history table repaired so 002–005 are marked reverted (their objects live in the baseline). A fresh deploy is fully reconstructible from git. |
 | validate-code Edge Function | ✅ Deployed | Deployed to prod 2026-05-29 (`supabase functions deploy validate-code --no-verify-jwt`). It is the only path to `validate_route_code()` — anon and PUBLIC execute were revoked (008 + 010). |
 | Supabase env vars | ✅ Set | `.env.local` exists (gitignored). Verify values point at the right project before any release. |
 | iOS permissions | ✅ Built | Camera + sharpened location descriptions in `app.json`. Five unused Expo-prebuild placeholders pruned 2026-06-02 (Face ID, NSLocationAlways*, microphone, photo library). `ITSAppUsesNonExemptEncryption=false` declared. iPad support dropped (`supportsTablet: false`). |
@@ -38,7 +38,8 @@ Install new skills via: `claude /plugin install <skill>@<marketplace>`
 | Session restoration | ✅ Built | Admin session restored on launch via `AppNavigator` |
 | Interface style | ✅ Fixed | `automatic` — driver dark / admin light both get correct system chrome |
 | Google OAuth2 service | ✅ Built | `GoogleAuthService` + `GoogleConnectScreen` — needs client IDs in `.env.local` |
-| Electron shell | ✅ Built | `electron/main.js` — `npm run electron` to launch |
+| Electron shell | ✅ Built | `electron/main.js` — `npm run electron:dev` to launch (after `npm run web`) |
+| Driver map + route optimisation | ✅ Built | `DriverMapScreen` (native; `.web.tsx` stub for Electron) + `RouteService` — Google Directions waypoint optimisation, straight-line fallback without `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` |
 | Photo compression | ✅ Built | Resizes to max 1600px before upload via `expo-image-manipulator` |
 | Offline queue | ✅ Built | `OfflineQueueService` + `OfflineBanner` — queues uploads and completions, flushes on reconnect |
 | Completion email | ✅ Built | `mailto:` prompt after mark complete — pre-fills agent details |
@@ -51,7 +52,8 @@ Install new skills via: `claude /plugin install <skill>@<marketplace>`
 |---|---|---|
 | `EXPO_PUBLIC_SUPABASE_URL` | `.env.local` | ✅ Present (file exists, gitignored; value not inspected per Control table) |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | `.env.local` | ✅ Present (file exists, gitignored; value not inspected per Control table) |
-| `EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS` / `_WEB` | `.env.local` | ⚠️ Required for Sheets import — confirm populated before relying on Google OAuth flow |
+| `EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS` / `_WEB` | `.env.local` | ✅ Present per the 2026-06-02 security-audit repo scan (R6 noted `.env.local` holds "anon key + Supabase URL + Google IDs"). Verify they point at the right Google Cloud project before a release. |
+| `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` | `.env.local` | ⚠️ Optional — without it the driver map falls back to straight-line routes (no Directions API call) |
 
 ---
 
@@ -61,7 +63,9 @@ Install new skills via: `claude /plugin install <skill>@<marketplace>`
 |---|---|---|
 | ~~Admin write RLS policy~~ | ✅ Closed (phantom) | Re-audited 2026-05-27: no admin code writes `jobs.is_complete`. The only writer is the driver path via `complete_job()` RPC (atomic, SECURITY DEFINER, FOR UPDATE row lock). Admins only INSERT jobs (Sheets import, working in v1.0.0) and SELECT. No policy needed. |
 | ~~Brand blue exact hex~~ | ✅ Closed (2026-05-31) | Sampled directly from `Sige2site-04.png`; dominant pixel value `#0CAAEC` (HSL 198°/90%/49%). `colors.brand` updated; literal logo blue used on icon/splash/adaptive background. Contrast trade-off documented in `src/utils/colors.ts`. |
-| Google Client IDs | Open | Needs Google Cloud Console project → `.env.local` `EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS` / `_WEB`. **Step-by-step setup:** `docs/GOOGLE_OAUTH_SETUP.md`. |
+| ~~Google Client IDs~~ | ✅ Closed (2026-06-10) | Present in `.env.local` per the 2026-06-02 audit repo scan (R6). Setup reference if they ever need recreating: `docs/GOOGLE_OAUTH_SETUP.md`. |
+| ~~Push migrations 011 + 012~~ | ✅ Closed (2026-06-10) | Pushed via `supabase db push` and live-verified through the Management API: DELETE policy present (`is_complete = false`, authenticated), driver UPDATE policy + `complete_job` + `recover_existing_photo` all carry the 24h grace, `validate_route_code` stays strict and anon-execute stays revoked. |
+| ~~Privacy/review contact email domain~~ | ✅ Closed (2026-06-10) | `sign2sign.com.au` had no MX records; all contact addresses switched to `bryanna@sign2site.com.au` (Outlook MX confirmed) in PRIVACY.md, APP_REVIEW_NOTES, and the login placeholder. **Remaining:** republish the GH Pages policy, and confirm with Bryanna that her mailbox is on that domain before submission. |
 | ~~App icon / splash screen~~ | ✅ Closed (2026-05-31) | Generated from `Sige2site-04.png`: `assets/icon.png` (1024², brand-blue bg, opaque), `splash-icon.png` (2048², transparent), Android adaptive foreground/background/monochrome. Source PNG preserved at `assets/_source/logo-original.png` + `logo-trimmed.png`. Splash and Android adaptive background colours set to brand blue in `app.json`. |
 | In-app account deletion (Apple 5.1.1(v)) | ✅ Closed (2026-05-31) | `supabase/functions/delete-admin-account/` deployed-ready (verifies caller JWT, deletes via service role). `AuthService.deleteAccount`. UI: `src/screens/admin/AccountScreen.tsx` reachable from Dashboard → Account. Two-step confirmation, signs out on success. Deploy with `supabase functions deploy delete-admin-account`. |
 | Privacy policy + App Privacy labels | ✅ Drafted (2026-05-31) | `PRIVACY.md` ready for publication (3 `{{…}}` placeholders to fill: operator legal name, postal address, contact email). Operator checklist for the App Store Connect questionnaire at `docs/APP_PRIVACY_LABELS.md`. Hosting options listed; policy URL also referenced from `AccountScreen.tsx:PRIVACY_POLICY_URL`. |

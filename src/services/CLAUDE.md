@@ -169,9 +169,10 @@ const { error } = await supabase.auth.signInWithPassword({ email, password });
 | Read `jobs` for active codes | ✅ (RLS policy) | ✅ |
 | Read active `route_codes` (id, driver_slot, created_date, expires_at, is_active only — `code` is column-revoked) | ✅ (granted in 006) | ✅ |
 | Read `jobs` | ❌ (revoked in 006) — drivers reach jobs only through `validate_route_code()` / `recover_existing_photo()` RPCs | ✅ |
-| Write `jobs` — photo fields directly (`JobPhotoService.uploadPhoto`) | ✅ via the legacy driver UPDATE policy (originally in migration 002; the file isn't in the repo but the policy still exists in prod — its USING clause checks `route_codes`, not `jobs`, which is why anon UPDATE survives the 006 SELECT revoke) | ✅ |
-| Write `jobs.is_complete` (driver, `JobPhotoService.markJobComplete`) | ✅ via the `complete_job()` RPC (SECURITY DEFINER, FOR UPDATE row lock, idempotent) | ✅ |
+| Write `jobs` — photo fields directly (`JobPhotoService.uploadPhoto`) | ✅ via the driver UPDATE policy (originally dashboard-era migration 002; once migration 012 is pushed it is recreated in-repo with a 24h post-expiry sync-grace window — its USING clause checks `route_codes`, not `jobs`, which is why anon UPDATE survives the 006 SELECT revoke) | ✅ |
+| Write `jobs.is_complete` (driver, `JobPhotoService.markJobComplete`) | ✅ via the `complete_job()` RPC (SECURITY DEFINER, FOR UPDATE row lock, idempotent; accepts codes up to 24h past expiry once migration 012 is pushed — offline-queue flush) | ✅ |
 | Write `jobs` — insert new jobs | ❌ | ✅ |
+| Delete `jobs` | ❌ | ✅ incomplete jobs only (migration 011) — completed jobs are completion evidence, undeletable from the app |
 | Write `route_codes` | ❌ | ✅ |
 
 The service role key is **never shipped in the app**. Edge Function (`supabase/functions/validate-code`) is the only component that holds it.
@@ -180,7 +181,7 @@ The service role key is **never shipped in the app**. Edge Function (`supabase/f
 
 ## Never read schema field names from memory — read the migration
 
-Always read the migrations in `supabase/migrations/` before writing a Supabase query predicate (`001_initial.sql` baseline + `006_–010_` applied on top). Never guess column names. The TypeScript field mapping is in `src/data/CLAUDE.md`.
+Always read the migrations in `supabase/migrations/` before writing a Supabase query predicate (`001_initial.sql` baseline + `006_–012_` applied on top). Never guess column names. The TypeScript field mapping is in `src/data/CLAUDE.md`.
 
 ```typescript
 // ✅ — verified against migration

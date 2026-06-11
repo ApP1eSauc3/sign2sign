@@ -1,7 +1,7 @@
 # Sign2Sign — Privacy Policy
 
 **Effective date:** 2026-05-31
-**Last updated:** 2026-05-31
+**Last updated:** 2026-06-10
 
 This policy explains what data the Sign2Sign mobile app and Electron admin
 app ("Sign2Sign", "the app") collect, why, how it is stored, and what your
@@ -9,7 +9,7 @@ rights are.
 
 Sign2Sign is operated by **Sign2Site Pty Ltd** ("we", "us") on behalf
 of Sign2Site (sign2site.com.au). For privacy enquiries contact
-**bryanna@sign2sign.com.au**.
+**bryanna@sign2site.com.au**.
 
 ---
 
@@ -45,7 +45,7 @@ advertising SDK, and no third-party tracking in the app (verified against
 
 | Data | Why we need it | Where it lives |
 |---|---|---|
-| 6-digit daily route code | Authenticate you for that day's route | Sent to a Supabase Edge Function, not stored client-side |
+| 6-digit daily route code | Authenticate you for that day's route | Sent to a Supabase Edge Function; held in app memory during your shift. If you work offline, pending uploads (which include the code) are kept on the device until they sync, then removed |
 | Job photos (camera) | Evidence the work was completed | Supabase Storage (bucket `job-photos`) |
 | GPS latitude/longitude at the moment a photo is taken | Verify the photo was taken at the work site | Stored on the job record (`photo_gps_lat`, `photo_gps_lng`) |
 | Anonymous device ID (random UUID) | Per-device rate limit on code-validation attempts | Device SecureStore + sent with each code attempt |
@@ -114,9 +114,10 @@ your data is transferred internationally to that region.
 | Data | Retention |
 |---|---|
 | Admin accounts | Until the admin deletes the account in-app (see §7) or we are instructed to delete it |
-| Daily route codes | Expire automatically at end of day; archived for 30 days then deleted |
-| Job records and photos | Retained for the operating period the customer (sign2site.com.au) requires for completion records; default 24 months, then deleted |
-| Anonymous driver device ID | Stored only on the device; cleared when the app is uninstalled |
+| Daily route codes | Become unusable at 06:00 the morning after they are issued (with a short technical grace period for syncing work completed offline). The code record itself is retained with the job history it belongs to |
+| Job records and photos | Retained as the customer's (sign2site.com.au) completion records for as long as the customer requires them; deleted on the customer's instruction or on a verified request (see §7) |
+| Code-attempt logs (anonymous device ID + timestamp) | Deleted from the server automatically after 24 hours |
+| Anonymous driver device ID | Stored on the device; cleared when the app is uninstalled |
 | Google OAuth tokens | Stored only on the admin's device; revoked when you disconnect or uninstall |
 
 ---
@@ -124,7 +125,7 @@ your data is transferred internationally to that region.
 ## 7. Your rights
 
 You can ask us to access, correct, or delete personal data we hold about
-you. To exercise these rights, email **bryanna@sign2sign.com.au**.
+you. To exercise these rights, email **bryanna@sign2site.com.au**.
 
 **Admin account deletion in the app.** Admins can permanently delete
 their own account from inside the app: open **Account → Delete
@@ -166,7 +167,7 @@ data from children.
   URLs to images are short-lived signed URLs generated at display time.
 
 No system is perfectly secure. If you believe you've found a security
-issue, please email **bryanna@sign2sign.com.au** rather than disclosing
+issue, please email **bryanna@sign2site.com.au** rather than disclosing
 it publicly.
 
 ---
@@ -184,4 +185,4 @@ available at the URL listed on the App Store page.
 
 **Sign2Site Pty Ltd**
 Perth WA 6031, Australia
-Privacy enquiries: **bryanna@sign2sign.com.au**
+Privacy enquiries: **bryanna@sign2site.com.au**

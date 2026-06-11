@@ -1,6 +1,6 @@
 # Sign2Sign
 
-You are a senior React Native developer mentoring a junior. Explain reasoning, flag trade-offs, and guide toward production-quality decisions. Field operations app for sign installation/removal crews. Expo (React Native) mobile app for drivers and admins. Electron wrapper for Windows admin. Supabase backend.
+You are a senior React Native developer mentoring a junior. Explain reasoning, flag trade-offs, and guide toward production-quality decisions. Field operations app for sign installation/removal crews. Expo (React Native) mobile app for drivers and admins. Electron wrapper for desktop admin (macOS shipped in v1.0.0; Windows deferred — no code-signing cert). Supabase backend.
 
 Read this file before writing any code. Each layer also has its own `CLAUDE.md` with specific import rules, patterns, and ✅/❌ examples — those load automatically when working in that directory.
 
@@ -25,7 +25,7 @@ Who owns what. Claude must not edit **Human** files without an explicit instruct
 
 | File / directory | Owner | Notes |
 |---|---|---|
-| `supabase/migrations/*.sql` | **Human** | Production impact — never edit a pushed migration. Add a new one instead. `001_initial.sql` is the committed baseline (dump of prod, captures the dashboard-bootstrapped 001–005). Migrations `006`–`010` are committed and applied to prod. A fresh deploy is reconstructible from git. Next free: `011_*.sql`. |
+| `supabase/migrations/*.sql` | **Human** | Production impact — never edit a pushed migration. Add a new one instead. `001_initial.sql` is the committed baseline (dump of prod, captures the dashboard-bootstrapped 001–005). Migrations `006`–`010` are committed and applied to prod. `011` (admin delete on incomplete jobs) and `012` (24h offline-sync grace) were written, pushed, and live-verified 2026-06-10. Next free: `013_*.sql`. |
 | `.env.local` | **Human** | Contains real Supabase keys — never read aloud, never log, never commit |
 | `app.json` | **Human** | Expo config — never edit without instruction |
 | `electron/` | **Human** | Thin shell only — never add business logic |
@@ -185,7 +185,7 @@ Before editing any feature, read every file listed. These are the exact files th
 `CLAUDE.md` *(design persona)*
 
 ### Schema / Supabase
-`supabase/migrations/` *(`001_initial.sql` baseline + `006_–010_` applied to prod)*
+`supabase/migrations/` *(`001_initial.sql` baseline + `006_–012_` applied to prod)*
 `supabase/functions/validate-code/index.ts` *(IP-throttled wrapper around `validate_route_code()` — the only driver auth path post-008)*
 `src/services/supabaseClient.ts`
 `src/data/SignJob.ts` *(field name mapping table in src/data/CLAUDE.md)*
@@ -235,12 +235,12 @@ Before editing any feature, read every file listed. These are the exact files th
 
 Migrations live in `supabase/migrations/`. Run with `supabase db push`.
 
-**State of play (2026-05-29):** `001_initial.sql` is the committed baseline — a `supabase db dump --schema public` of the prod project, so it captures everything the dashboard-bootstrapped `001_–005_` created. Migrations `006_–010_` are committed and applied to prod (`supabase db push`). The remote migration-history table was repaired so `002_–005_` are marked reverted (their objects live in the baseline, not as standalone files). A fresh deploy is reconstructible from git: `001_initial.sql` then `006_–010_`.
+**State of play (2026-06-10):** `001_initial.sql` is the committed baseline — a `supabase db dump --schema public` of the prod project, so it captures everything the dashboard-bootstrapped `001_–005_` created. Migrations `006_–010_` are committed and applied to prod (`supabase db push`). `011_admin_delete_incomplete_jobs.sql` and `012_offline_sync_grace.sql` were pushed and live-verified on 2026-06-10 (policy predicates, grace windows, and per-role grants checked via the Management API). The remote migration-history table was repaired so `002_–005_` are marked reverted (their objects live in the baseline, not as standalone files). A fresh deploy is reconstructible from git: `001_initial.sql` then `006_–012_`.
 
 References to the dashboard-era files inside `006_rate_limit_codes.sql` are accurate (e.g. "the driver UPDATE policy (002)", "the 005 trigger") — those objects exist in prod and in `001_initial.sql`, just not as separate `002_`–`005_` files.
 
 When adding a new column:
-1. Add a new migration file with the next sequence number (next free: `011_*.sql`)
+1. Add a new migration file with the next sequence number (next free: `013_*.sql`)
 2. Update the relevant type in `src/data/`
 3. Update any service that reads or writes that table
 
@@ -253,8 +253,8 @@ When adding a new column:
 `electron/main.js` is a thin shell only:
 - Opens a `BrowserWindow` loading the Expo web build output
 - No business logic in Electron — everything runs in React
-- Build: `npm run web` → `npx electron .`
-- The Windows admin app and iOS admin app run identical React code
+- Build: `npm run web` → `npm run electron:dev` (packaged: `npm run electron:build:mac`)
+- The desktop admin app and iOS admin app run identical React code
 
 ---
 
