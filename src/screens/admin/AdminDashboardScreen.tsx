@@ -78,7 +78,9 @@ export default function AdminDashboardScreen({ navigation }: Props) {
     if (isGenerating) return;
     Alert.alert(
       'Generate Today\'s Codes',
-      `This will create new codes for ${driverCount} driver slots. Continue?`,
+      `This will create new codes for ${driverCount} driver slots.\n\n` +
+        'Any codes drivers are using RIGHT NOW stop working immediately — ' +
+        'drivers mid-route will be locked out until you give them their new code. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -143,8 +145,12 @@ export default function AdminDashboardScreen({ navigation }: Props) {
     setImportResult(null);
     try {
       const jobs = await GoogleSheetsService.importJobs(sheetId.trim(), sheetName.trim(), dateObj);
-      await GoogleSheetsService.saveJobsToRoute(jobs, selectedRouteCodeId);
-      setImportResult(`✓ ${jobs.length} jobs imported for ${importDate}.`);
+      const { imported, skippedCompleted } = await GoogleSheetsService.saveJobsToRoute(jobs, selectedRouteCodeId);
+      setImportResult(
+        skippedCompleted > 0
+          ? `✓ ${imported} jobs imported for ${importDate} — ${skippedCompleted} already completed, kept as-is.`
+          : `✓ ${imported} jobs imported for ${importDate}.`
+      );
       setSheetId('');
       setSheetName('');
       setSelectedRouteCodeId(null);

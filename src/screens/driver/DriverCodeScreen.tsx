@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -22,9 +22,20 @@ type Props = NativeStackScreenProps<DriverStackParamList, 'DriverCode'>;
 export default function DriverCodeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const setMode = useAppStore((s) => s.setMode);
-  const { loadSession, isLoadingSession, codeError } = useDriverSession();
+  const { loadSession, isLoadingSession, codeError, flushOfflineQueue } = useDriverSession();
 
   const [code, setCode] = useState('');
+
+  // Flush any operations queued during a previous shift, BEFORE a session
+  // exists. Queued ops carry their own route code, and the server accepts
+  // finish-work writes for 24h past code expiry (migration 012) — so a driver
+  // who went home offline only has to open the app for yesterday's photos and
+  // completions to sync. Waiting for a successful loadSession would strand
+  // them: an expired code can't open a session at all.
+  useEffect(() => {
+    flushOfflineQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit() {
     if (code.length !== 6) return;

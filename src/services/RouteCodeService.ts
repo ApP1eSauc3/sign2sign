@@ -85,6 +85,19 @@ function mapJobRow(j: JobRow): SignJob {
   };
 }
 
+// Local calendar date as YYYY-MM-DD. NEVER use toISOString().split('T')[0]
+// here — that is the UTC date, and Perth is UTC+8: codes generated before
+// 08:00 local would be stamped with *yesterday's* date, vanish from the
+// dashboard at 08:00, and dodge the regeneration deactivation filter
+// (leaving two live codes per slot). created_date is a local business-day
+// label; expiry and validation always use the absolute expires_at instant.
+function localDateString(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 function expiryNextMorning(): string {
   // Expire at 06:00 the following morning rather than 23:59 tonight.
   // Drivers finishing late jobs or working past midnight are not locked out
@@ -171,21 +184,26 @@ export const RouteCodeService = {
   // so the partial unique index (one active code per slot per day) is satisfied.
   // Retries only on code value collision (two slots generating the same 6 digits).
   async generateDailyCodes(driverSlots: number[]): Promise<DailyCode[]> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateString();
     const expires = expiryNextMorning();
     const results: DailyCode[] = [];
 
     for (const slot of driverSlots) {
-      // Step 1: deactivate any existing active code for this slot today.
-      // This satisfies the partial unique index and invalidates the old credential.
+      // Step 1: deactivate any LIVE code for this slot — filtered by expiry,
+      // not by created_date. A date filter misses codes whose created_date
+      // straddles the UTC boundary (the pre-fix bug: a 7am Perth code was
+      // stamped with yesterday's UTC date, survived regeneration, and stayed
+      // a live credential invisible to the dashboard). Already-expired codes
+      // are left alone: they can't validate a session, and deactivating them
+      // would cut off the offline-sync grace window (migration 012).
       // Drivers mid-route on the old code will receive RLS write errors — intentional
       // when the admin explicitly regenerates codes.
       const { error: deactivateError } = await supabase
         .from('route_codes')
         .update({ is_active: false })
         .eq('driver_slot', slot)
-        .eq('created_date', today)
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .gt('expires_at', new Date().toISOString());
 
       // A zero-row update (no existing code) returns error: null — that's fine.
       // Any actual error must be thrown now: if we silently proceed, the old code
@@ -227,7 +245,9 @@ export const RouteCodeService = {
     return results;
   },
 
-  // Admin: fetch all jobs for a route code (active codes only — RLS constraint)
+  // Admin: fetch all jobs for a route code. The "Admins can read all jobs"
+  // policy has no expiry predicate — route detail still works the morning
+  // after the code expires.
   async getRouteJobs(routeCodeId: string): Promise<SignJob[]> {
     const { data, error } = await supabase
       .from('jobs')
@@ -240,15 +260,17 @@ export const RouteCodeService = {
     return ((data ?? []) as JobRow[]).map(mapJobRow);
   },
 
-  // Admin: fetch today's active codes for the dashboard
+  // Admin: fetch the codes drivers can currently use, for the dashboard.
+  // Filter on liveness (is_active + unexpired), NOT on created_date — the
+  // date column is a local business-day label and pre-fix rows may carry a
+  // UTC-shifted date. A code that validates a driver session must always be
+  // visible to the admin.
   async getActiveCodes(): Promise<DailyCode[]> {
-    const today = new Date().toISOString().split('T')[0];
-
     const { data, error } = await supabase
       .from('route_codes')
       .select('*')
-      .eq('created_date', today)
       .eq('is_active', true)
+      .gt('expires_at', new Date().toISOString())
       .order('driver_slot', { ascending: true });
 
     if (error) throw new Error(error.message);

@@ -209,21 +209,48 @@ export const GoogleSheetsService = {
   },
 
   // Save parsed jobs to Supabase, linked to a route code.
-  // Replaces any existing jobs for this route — clean reimport, no duplicates.
+  // Replace-incomplete semantics:
+  //   1. Delete the route's INCOMPLETE jobs. The DELETE policy (migration 011)
+  //      is scoped to is_complete = false — completed jobs are completion
+  //      evidence (photo, GPS, timestamp) and survive every re-import.
+  //   2. Skip import rows matching a surviving completed job (same address +
+  //      job_type) so the insert doesn't trip the duplicate-location trigger
+  //      (P0004) on work that's already done.
+  //   3. Insert the rest. Returns a summary for the dashboard message.
   async saveJobsToRoute(
     jobs: Omit<SignJob, 'id' | 'isComplete'>[],
     routeCodeId: string
-  ): Promise<void> {
+  ): Promise<{ imported: number; skippedCompleted: number }> {
     const { error: deleteError } = await supabase
       .from('jobs')
       .delete()
-      .eq('route_code_id', routeCodeId);
+      .eq('route_code_id', routeCodeId)
+      .eq('is_complete', false);
 
     if (deleteError) throw new Error(`Could not clear existing jobs: ${deleteError.message}`);
 
-    if (jobs.length === 0) return;
+    // Whatever still exists on the route after the delete is completed work.
+    const { data: survivors, error: survivorsError } = await supabase
+      .from('jobs')
+      .select('address, job_type')
+      .eq('route_code_id', routeCodeId);
 
-    const records = jobs.map((job) => ({
+    if (survivorsError) throw new Error(`Could not read existing jobs: ${survivorsError.message}`);
+
+    const completedKeys = new Set(
+      ((survivors ?? []) as { address: string; job_type: string }[]).map(
+        (j) => `${j.address.trim().toLowerCase()}|${j.job_type}`
+      )
+    );
+
+    const toImport = jobs.filter(
+      (job) => !completedKeys.has(`${job.address.trim().toLowerCase()}|${job.jobType}`)
+    );
+    const skippedCompleted = jobs.length - toImport.length;
+
+    if (toImport.length === 0) return { imported: 0, skippedCompleted };
+
+    const records = toImport.map((job) => ({
       route_code_id: routeCodeId,
       client_name: job.clientName,
       agent_name: job.agentName,
@@ -238,6 +265,18 @@ export const GoogleSheetsService = {
     }));
 
     const { error } = await supabase.from('jobs').insert(records);
-    if (error) throw new Error(error.message);
+    if (error) {
+      // P0004 = duplicate-location trigger: an address+type in this sheet is
+      // already assigned to ANOTHER driver today (same-route duplicates were
+      // filtered above). Surface that in admin language, not SQLSTATE.
+      if (error.code === 'P0004') {
+        throw new Error(
+          'Import blocked: a job in this sheet is already assigned to another driver today. ' +
+            'Check the route assignments, then re-import.'
+        );
+      }
+      throw new Error(error.message);
+    }
+    return { imported: toImport.length, skippedCompleted };
   },
 };

@@ -71,7 +71,7 @@ export default function AdminLoginScreen({ navigation }: Props) {
         <Text style={styles.label} nativeID="adminEmailLabel">Email</Text>
         <TextInput
           style={styles.input}
-          placeholder="you@sign2sign.com.au"
+          placeholder="you@sign2site.com.au"
           placeholderTextColor={colors.adminTextHint}
           autoCapitalize="none"
           autoCorrect={false}
