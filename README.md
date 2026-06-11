@@ -466,6 +466,10 @@ The full design system lives in `src/the screens layer guide` and `src/utils/col
 
 Before editing any file, read the `the project guide` in that layer's directory. Each layer has strict import rules and patterns that keep the codebase maintainable.
 
+### Doc rules
+
+Before editing this README or any other md file, read **the project guide → Documentation Integrity Rules**. In short: facts live in one canonical file (RLS in `the services layer guide`, colours in `src/utils/colors.ts`, scripts in `package.json`) — link, don't restate; deployed-state claims carry a date and a verification method; never document a retention/deletion behaviour that nothing implements.
+
 ### Adding a database column
 
 1. Create a new migration file with the next sequence number (next free: `013_*.sql`; `011_`/`012_` are on disk awaiting `db push`) — never edit pushed migrations
