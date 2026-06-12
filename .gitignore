@@ -43,6 +43,15 @@ yarn-error.*
 # Claude Code
 .claude/
 electron-build.env
+CLAUDE.md
+**/CLAUDE.md
+
+# Internal working docs (not for public repo)
+CODEBASE_STATUS.md
+ELECTRON_HARDENING_HANDOVER.md
+TESTING.md
+SKILLS.md
+TYPESAFETY.md
 
 # Supabase CLI scratch
 supabase/.temp/
