@@ -42,6 +42,10 @@ yarn-error.*
 
 electron-build.env
 
+# Stray screenshots / design exports
+Screenshot*.png
+Sige2site-*.png
+
 # Internal working docs (not for public repo)
 CODEBASE_STATUS.md
 TESTING.md
