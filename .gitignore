@@ -42,5 +42,11 @@ yarn-error.*
 
 electron-build.env
 
+# Internal working docs (not for public repo)
+CODEBASE_STATUS.md
+TESTING.md
+SKILLS.md
+TYPESAFETY.md
+
 # Supabase CLI scratch
 supabase/.temp/
