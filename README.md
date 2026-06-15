@@ -192,13 +192,13 @@ Individual sign installation or removal tasks. Imported from Google Sheets and l
 
 Policies alone don't tell the story: migrations 006/008/010 revoked grants on
 top of them, so several baseline policies are unreachable for anon. Current
-model (the table in `the services layer guide` is canonical):
+model:
 
 | Access | Anon (drivers) | Authenticated (admins) |
 |---|---|---|
 | Read `route_codes` | Only `id, driver_slot, created_date, expires_at, is_active` (the `code` column is grant-revoked, 006) | ✅ all, incl. historical |
 | Read `jobs` | ❌ table SELECT revoked (006) — job data reaches drivers only through `validate_route_code()` via the `validate-code` Edge Function | ✅ all — survives code expiry (route detail works next morning) |
-| Write `jobs` photo fields | ✅ driver UPDATE policy, gated on the job's code being live (24h sync grace once migration 012 is pushed) | ✅ |
+| Write `jobs` photo fields | ✅ driver UPDATE policy, gated on the job's code being live (24h sync grace — migration 012, live-verified 2026-06-10) | ✅ |
 | Set `jobs.is_complete` | ✅ only via `complete_job()` RPC (SECURITY DEFINER, row lock, photo gate, idempotent) | — admins never write `is_complete` |
 | INSERT `jobs` | ❌ | ✅ |
 | DELETE `jobs` | ❌ | ✅ incomplete jobs only (migration 011 — completion evidence is not deletable from the app) |
@@ -363,7 +363,7 @@ Launch against the last web build (run `npm run web` first if `dist/` is stale):
 npm run electron:dev
 ```
 
-For a packaged, signed, notarized macOS build see `the Electron handover doc`:
+For a packaged, signed, notarized macOS build:
 
 ```bash
 npm run electron:build:mac
@@ -448,9 +448,9 @@ All user-facing error strings are listed here. Find their source in the referenc
 
 ## Design System
 
-The full design system lives in `src/the screens layer guide` and `src/utils/colors.ts`. Key principles:
+Colour tokens and usage rules live in `src/utils/colors.ts`. Key principles:
 
-- **Brand**: Two colours only — white and `#0CAAEC` (logo blue, sampled from the Sign2Site logo 2026-05-31). No gradients, no third colour.
+- **Brand**: Two colours only — white and one sky blue. See `colors.brand` in `src/utils/colors.ts` (sampled from the Sign2Site logo 2026-05-31). No gradients, no third colour.
 - **Contrast**: WCAG AAA (7:1) minimum. `colors.bg` + `colors.textPrimary` achieves 16:1. Direct sunlight reduces effective contrast by ~50%.
 - **Touch targets**: 56pt minimum (bare fingers), 64pt for primary actions (gloved hands).
 - **Admin mode**: Light background, blue accents.
@@ -464,15 +464,15 @@ The full design system lives in `src/the screens layer guide` and `src/utils/col
 
 ### Layer rules
 
-Before editing any file, read the `the project guide` in that layer's directory. Each layer has strict import rules and patterns that keep the codebase maintainable.
+The codebase follows a strict layered architecture (`data → services → stores → utils → screens → navigation`). Each layer has its own import rules: services may import data but no React/RN; stores may import services and data; only screens contain UI. Keep these boundaries when adding code.
 
 ### Doc rules
 
-Before editing this README or any other md file, read **the project guide → Documentation Integrity Rules**. In short: facts live in one canonical file (RLS in `the services layer guide`, colours in `src/utils/colors.ts`, scripts in `package.json`) — link, don't restate; deployed-state claims carry a date and a verification method; never document a retention/deletion behaviour that nothing implements.
+Facts live in one canonical place — link, don't restate: RLS in this README's grants table, colours in `src/utils/colors.ts`, npm scripts in `package.json`. Deployed-state claims should carry a date and how they were verified. Never document a retention/deletion behaviour that nothing in the code implements.
 
 ### Adding a database column
 
-1. Create a new migration file with the next sequence number (next free: `013_*.sql`; `011_`/`012_` are on disk awaiting `db push`) — never edit pushed migrations
+1. Create a new migration file with the next sequence number (next free: `013_*.sql`; `006_`–`012_` are applied to prod, live-verified 2026-06-10) — never edit pushed migrations
 2. Update the relevant type in `src/data/`
 3. Update any service that reads or writes that table
 4. Run `supabase db push`
