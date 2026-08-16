@@ -67,29 +67,58 @@ setInterval(() => {
   }
 }, WINDOW_MS).unref?.();
 
-// CORS — the iOS app and Electron desktop don't need this, but a future
-// web admin (or the Expo web preview) does. Wildcard is acceptable here:
-// the function is JWT-protected, so the origin can't substitute for auth.
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
+// CORS — allowlist, not wildcard.
+//
+// CORS is not an authorization control: the JWT is. A non-browser caller
+// (curl, a script) sets any Origin it likes and CORS never applies to it.
+// What an allowlist buys is defence-in-depth for the *browser* surface —
+// only our own origins can read a response, so a malicious page can't use
+// a visitor's browser as a proxy to this endpoint (which would, at minimum,
+// let it burn that IP's 6-per-minute throttle budget).
+//
+// The two entries below are pinned from electron/main.js:
+//   app://bundle          — APP_ORIGIN, the packaged desktop renderer. The
+//                           scheme is registered corsEnabled:true, so the
+//                           renderer DOES send Origin and IS subject to CORS.
+//   http://localhost:8081 — DEV_SERVER_URL, Metro / Expo web in development.
+// The native iOS app sends no Origin header at all and is unaffected.
+// Add a hosted web-admin origin here if one ever ships.
+const ALLOWED_ORIGINS = ['app://bundle', 'http://localhost:8081'];
+
+const BASE_CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, apikey, content-type',
   'Access-Control-Max-Age': '86400',
+  // Responses now vary by request Origin; without this, a shared cache could
+  // serve one origin's Allow-Origin header to another.
+  'Vary': 'Origin',
 };
 
-function jsonResponse(body: unknown, status = 200) {
+// An unknown or absent Origin gets no Allow-Origin header — the request is
+// still processed normally. Rejecting on Origin would add brittleness for no
+// security gain (see the note above on non-browser callers); the browser
+// enforces the boundary by refusing to hand the response to the caller.
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get('Origin');
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    return { ...BASE_CORS_HEADERS, 'Access-Control-Allow-Origin': origin };
+  }
+  return BASE_CORS_HEADERS;
+}
+
+function jsonResponse(req: Request, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
   });
 }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204, headers: corsHeaders(req) });
   }
   if (req.method !== 'POST') {
-    return jsonResponse({ error: 'method_not_allowed' }, 405);
+    return jsonResponse(req, { error: 'method_not_allowed' }, 405);
   }
 
   // Supabase API gateway forwards the caller IP in x-forwarded-for.
@@ -98,6 +127,7 @@ Deno.serve(async (req) => {
   const ip = xff.split(',')[0]?.trim() || 'unknown';
   if (!checkIpThrottle(ip)) {
     return jsonResponse(
+      req,
       { error: 'rate_limited', message: 'Too many attempts. Wait a minute and try again.' },
       429
     );
@@ -106,20 +136,20 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get('Authorization') ?? '';
   const match = /^Bearer\s+(.+)$/.exec(authHeader);
   if (!match) {
-    return jsonResponse({ error: 'missing_authorization' }, 401);
+    return jsonResponse(req, { error: 'missing_authorization' }, 401);
   }
   const accessToken = match[1];
 
   const { data: userData, error: userError } = await anonClient.auth.getUser(accessToken);
   if (userError || !userData?.user) {
-    return jsonResponse({ error: 'invalid_token' }, 401);
+    return jsonResponse(req, { error: 'invalid_token' }, 401);
   }
 
   const userId = userData.user.id;
   const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
   if (deleteError) {
-    return jsonResponse({ error: 'delete_failed', message: deleteError.message }, 500);
+    return jsonResponse(req, { error: 'delete_failed', message: deleteError.message }, 500);
   }
 
-  return jsonResponse({ deleted: true, user_id: userId });
+  return jsonResponse(req, { deleted: true, user_id: userId });
 });
