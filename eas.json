@@ -15,6 +15,9 @@
       "distribution": "internal",
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "PREVIEW_IOS_BUNDLE_ID": "com.sign2sign.app.dev"
       }
     },
     "production": {
