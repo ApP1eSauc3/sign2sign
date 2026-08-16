@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
   Alert,
   ScrollView,
   Linking,
@@ -17,6 +16,9 @@ import { AuthService } from '../../services/AuthService';
 import { useAppStore } from '../../stores/useAppStore';
 import { AppMode } from '../../data/SignJob';
 import { colors } from '../../utils/colors';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { AdminCard } from '../components/AdminCard';
+import { PrimaryButton } from '../components/PrimaryButton';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'Account'>;
 
@@ -65,32 +67,23 @@ export default function AccountScreen({ navigation }: Props) {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}  // DESIGN §3.4 — icon hit slop
-          accessibilityRole="button"
-          accessibilityLabel="Back to dashboard"
-        >
-          <Text style={styles.backChevron}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Account</Text>
-        {/* Spacer so the title stays optically centred against the back chevron. */}
-        <View style={styles.headerSpacer} />
-      </View>
-      <View style={styles.divider} />
+      <ScreenHeader
+        title="Account"
+        onBack={() => navigation.goBack()}
+        variant="admin"
+      />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
       >
         <Text style={styles.sectionLabel}>SIGNED IN AS</Text>
-        <View style={styles.sectionCard}>
+        <AdminCard>
           <Text style={styles.emailValue}>{email ?? '—'}</Text>
-        </View>
+        </AdminCard>
 
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>PRIVACY</Text>
-        <View style={styles.sectionCard}>
+        <AdminCard>
           <TouchableOpacity
             style={styles.linkRow}
             onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
@@ -102,10 +95,10 @@ export default function AccountScreen({ navigation }: Props) {
             <Text style={styles.linkLabel}>View privacy policy</Text>
             <Text style={styles.linkChevron} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">›</Text>
           </TouchableOpacity>
-        </View>
+        </AdminCard>
 
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>DANGER ZONE</Text>
-        <View style={[styles.sectionCard, styles.dangerCard]}>
+        <AdminCard style={styles.dangerCard}>
           <Text style={styles.dangerTitle}>Delete account</Text>
           <Text style={styles.dangerBody}>
             Permanently deletes your admin email + password from our
@@ -127,16 +120,13 @@ export default function AccountScreen({ navigation }: Props) {
           </Text>
 
           {!confirmArmed ? (
-            <TouchableOpacity
-              style={styles.armButton}
+            <PrimaryButton
+              label="Delete account…"
+              variant="outlineDestructive"
+              size="admin"
               onPress={handleArm}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Delete account"
-              accessibilityHint="Reveals the final confirmation step"
-            >
-              <Text style={styles.armButtonText}>Delete account…</Text>
-            </TouchableOpacity>
+              style={{ marginTop: 4 }}
+            />
           ) : (
             <>
               <Text style={styles.confirmHint}>
@@ -144,37 +134,27 @@ export default function AccountScreen({ navigation }: Props) {
                 forever" to confirm.
               </Text>
               <View style={styles.confirmRow}>
-                <TouchableOpacity
-                  style={[styles.cancelButton, isDeleting && styles.buttonDisabled]}
+                <PrimaryButton
+                  label="Cancel"
+                  variant="outlineNeutral"
+                  size="admin"
+                  disabled={isDeleting}
                   onPress={() => setConfirmArmed(false)}
+                  style={{ flex: 1 }}
+                />
+                <PrimaryButton
+                  label="Delete forever"
+                  variant="destructive"
+                  size="admin"
                   disabled={isDeleting}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancel"
-                  accessibilityState={{ disabled: isDeleting }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.confirmButton, isDeleting && styles.buttonDisabled]}
+                  loading={isDeleting}
                   onPress={handleConfirmDelete}
-                  disabled={isDeleting}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Delete forever"
-                  accessibilityHint="Permanently deletes your admin account"
-                  accessibilityState={{ disabled: isDeleting, busy: isDeleting }}
-                >
-                  {isDeleting ? (
-                    <ActivityIndicator color={colors.white} />
-                  ) : (
-                    <Text style={styles.confirmButtonText}>Delete forever</Text>
-                  )}
-                </TouchableOpacity>
+                  style={{ flex: 1 }}
+                />
               </View>
             </>
           )}
-        </View>
+        </AdminCard>
       </ScrollView>
     </View>
   );
@@ -192,17 +172,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,  // DESIGN §1.3 — standard page margin
     paddingVertical: 12,
   },
-  backChevron: {
-    fontSize: 32,
-    color: colors.brand,
-    fontWeight: '300',
-    width: 32,
-    lineHeight: 32,
-  },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: colors.adminText },  // DESIGN §1.7 — section header
-  headerSpacer: { width: 32 },
-  divider: { height: 1, backgroundColor: colors.adminDivider },
-
   scroll: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 24 },  // DESIGN §1.3
 
@@ -213,13 +182,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     marginBottom: 10,
-  },
-  sectionCard: {
-    backgroundColor: colors.adminSurface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.adminDivider,
-    padding: 16,  // DESIGN §1.3
   },
   emailValue: { fontSize: 16, fontWeight: '600', color: colors.adminText },
 
@@ -246,43 +208,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-  armButton: {
-    height: 48,  // DESIGN §1.8 — admin primary button
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.adminError,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-  },
-  armButtonText: { color: colors.adminError, fontSize: 15, fontWeight: '600' },
-
   confirmHint: {
     fontSize: 13,
     color: colors.adminTextSecondary,
     marginBottom: 12,
   },
   confirmRow: { flexDirection: 'row', gap: 12 },
-  cancelButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.adminBorder,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelButtonText: { color: colors.adminText, fontSize: 15, fontWeight: '600' },
-  confirmButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 8,
-    backgroundColor: colors.adminError,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmButtonText: { color: colors.white, fontSize: 15, fontWeight: '700' },
-  buttonDisabled: { opacity: 0.4 },
 });

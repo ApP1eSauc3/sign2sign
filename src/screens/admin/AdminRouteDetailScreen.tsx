@@ -14,6 +14,9 @@ import { AdminStackParamList } from '../../navigation/AdminStack';
 import { RouteCodeService } from '../../services/RouteCodeService';
 import { SignJob } from '../../data/SignJob';
 import { colors } from '../../utils/colors';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { JobCard } from '../components/JobCard';
+import { EmptyState } from '../components/EmptyState';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'AdminRouteDetail'>;
 
@@ -53,16 +56,11 @@ export default function AdminRouteDetailScreen({ route, navigation }: Props) {
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.back}>← Dashboard</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.divider} />
+      <ScreenHeader
+        onBack={() => navigation.goBack()}
+        backLabel="Dashboard"
+        variant="admin"
+      />
 
       {/* Route hero */}
       <View style={styles.hero}>
@@ -130,12 +128,11 @@ export default function AdminRouteDetailScreen({ route, navigation }: Props) {
           renderItem={({ item }) => <RouteJobRow job={item} />}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No jobs assigned</Text>
-              <Text style={styles.emptyHint}>
-                Import a Google Sheet from the dashboard to add jobs to this route.
-              </Text>
-            </View>
+            <EmptyState
+              variant="admin"
+              title="No jobs assigned"
+              hint="Import a Google Sheet from the dashboard to add jobs to this route."
+            />
           }
         />
       )}
@@ -146,58 +143,27 @@ export default function AdminRouteDetailScreen({ route, navigation }: Props) {
 // ─── Job row ─────────────────────────────────────────────────────────────────
 
 function RouteJobRow({ job }: { job: SignJob }) {
-  const typeColor = job.jobType === 'install' ? colors.install : colors.removal;
-  const statusLabel = job.isComplete ? 'COMPLETE' : 'PENDING';
-  const statusBg = job.isComplete ? colors.statusCompleteBg : colors.statusPendingBg;
-  const statusText = job.isComplete ? colors.statusComplete : colors.statusPending;
+  const footer = job.isComplete && job.photoTimestamp ? (
+    <Text style={styles.jobCompletedAt}>
+      {`Photo · ${new Date(job.photoTimestamp).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`}
+      {job.photoGPSLat
+        ? `  ·  ${job.photoGPSLat.toFixed(4)}, ${job.photoGPSLng?.toFixed(4)}`
+        : ''}
+    </Text>
+  ) : !job.isComplete && !job.photoKey ? (
+    <Text style={styles.jobPhotoMissing}>Photo not yet taken</Text>
+  ) : null;
 
-  return (
-    <View style={[styles.jobRow, { borderLeftColor: typeColor }]}>
-      <View style={styles.jobRowMain}>
-        <View style={styles.jobRowTop}>
-          <View style={[styles.badge, { backgroundColor: statusBg }]}>
-            <Text style={[styles.badgeText, { color: statusText }]}>{statusLabel}</Text>
-          </View>
-          <View style={[styles.typePill, { borderColor: typeColor }]}>
-            <Text style={[styles.typePillText, { color: typeColor }]}>
-              {job.jobType.toUpperCase()}
-            </Text>
-          </View>
-        </View>
-        <Text style={styles.jobAddress}>{job.address}</Text>
-        <Text style={styles.jobMeta}>
-          {job.clientName}
-          {job.agentName ? `  ·  ${job.agentName}` : ''}
-        </Text>
-        {job.isComplete && job.photoTimestamp && (
-          <Text style={styles.jobCompletedAt}>
-            {`Photo · ${new Date(job.photoTimestamp).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}`}
-            {job.photoGPSLat
-              ? `  ·  ${job.photoGPSLat.toFixed(4)}, ${job.photoGPSLng?.toFixed(4)}`
-              : ''}
-          </Text>
-        )}
-        {!job.isComplete && !job.photoKey && (
-          <Text style={styles.jobPhotoMissing}>Photo not yet taken</Text>
-        )}
-      </View>
-    </View>
-  );
+  return <JobCard job={job} bordered footer={footer} />;
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.white },
-
-  header: {
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-  },
-  back: { fontSize: 15, fontWeight: '600', color: colors.brand },
 
   divider: { height: 1, backgroundColor: colors.adminDivider },
 
@@ -286,65 +252,16 @@ const styles = StyleSheet.create({
   listEmpty: { flex: 1 },
   separator: { height: 8 },
 
-  // Job row
-  jobRow: {
-    backgroundColor: colors.adminSurface,
-    borderRadius: 10,
-    borderLeftWidth: 4,
-    borderWidth: 1,
-    borderColor: colors.adminCardBorder,
-    overflow: 'hidden',
-  },
-  jobRowMain: { padding: 14 },
-  jobRowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  badgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8 },
-  typePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  typePillText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8 },
-  jobAddress: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.adminText,
-    marginBottom: 4,
-  },
-  jobMeta: { fontSize: 13, color: colors.adminTextTertiary, marginBottom: 4 },
+  // Job row footer content
   jobCompletedAt: {
     fontSize: 12,
     color: colors.adminSuccess,
     fontVariant: ['tabular-nums'],
+    marginTop: 4,
   },
   jobPhotoMissing: {
     fontSize: 12,
     color: colors.adminTextHint,
-  },
-
-  // Empty state
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    gap: 8,
-  },
-  emptyTitle: { fontSize: 17, fontWeight: '600', color: colors.adminTextTertiary },
-  emptyHint: {
-    fontSize: 14,
-    color: colors.adminTextHint,
-    textAlign: 'center',
-    lineHeight: 20,
+    marginTop: 4,
   },
 });

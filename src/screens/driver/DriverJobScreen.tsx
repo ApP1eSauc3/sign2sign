@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   Image,
   Alert,
   Linking,
@@ -20,6 +19,9 @@ import { JobPhotoService } from '../../services/JobPhotoService';
 import { colors } from '../../utils/colors';
 import { OfflineBanner } from '../OfflineBanner';
 import { JobUploadState } from '../../data/SignJob';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { TypePill } from '../components/TypePill';
+import { AdvancingActionButton } from '../components/AdvancingActionButton';
 
 type Props = NativeStackScreenProps<DriverStackParamList, 'DriverJob'>;
 
@@ -111,8 +113,6 @@ export default function DriverJobScreen({ route, navigation }: Props) {
     }
   }
 
-  const button = getButtonState(uploadState, job.isComplete, isMarkingComplete);
-
   function promptCompletionEmail(completedJob: typeof job) {
     if (!completedJob?.agentEmail) return;
     // agent_email originates from the Google Sheet (semi-trusted admin data).
@@ -174,19 +174,13 @@ export default function DriverJobScreen({ route, navigation }: Props) {
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Nav bar */}
-      <View style={styles.nav}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.navBack}>← Route</Text>
-        </TouchableOpacity>
-        <View style={[styles.typePill, { borderColor: typeColor }]}>
-          <Text style={[styles.typePillText, { color: typeColor }]}>
-            {job.jobType.toUpperCase()}
-          </Text>
-        </View>
-      </View>
+      <ScreenHeader
+        variant="driver"
+        backLabel="Route"
+        onBack={() => navigation.goBack()}
+        trailing={<TypePill jobType={job.jobType} />}
+        divider={false}
+      />
 
       <OfflineBanner />
 
@@ -260,18 +254,12 @@ export default function DriverJobScreen({ route, navigation }: Props) {
       {/* Advancing action button — fixed at bottom */}
       {!job.isComplete && (
         <View style={[styles.actionBar, { paddingBottom: insets.bottom + 16 }]}>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: button.color }]}
+          <AdvancingActionButton
+            uploadState={uploadState}
+            isComplete={job.isComplete}
+            isMarkingComplete={isMarkingComplete}
             onPress={handlePrimaryAction}
-            disabled={!button.enabled}
-            activeOpacity={0.85}
-          >
-            {button.loading ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Text style={styles.actionButtonText}>{button.label}</Text>
-            )}
-          </TouchableOpacity>
+          />
         </View>
       )}
 
@@ -284,45 +272,6 @@ export default function DriverJobScreen({ route, navigation }: Props) {
       )}
     </View>
   );
-}
-
-// ─── Exhaustiveness helper ────────────────────────────────────────────────────
-
-function assertNever(x: never): never {
-  throw new Error(`Unhandled upload state: ${JSON.stringify(x)}`);
-}
-
-// ─── Advancing button state ──────────────────────────────────────────────────
-
-function getButtonState(
-  state: JobUploadState,
-  isComplete: boolean,
-  isMarkingComplete: boolean
-): { label: string; color: string; enabled: boolean; loading: boolean } {
-  if (isComplete) {
-    return { label: '✓ Complete', color: colors.statusCompleteBg, enabled: false, loading: false };
-  }
-  switch (state.status) {
-    case 'idle':
-      return { label: 'Take Photo', color: colors.brand, enabled: true, loading: false };
-    case 'capturing':
-      return { label: 'Opening Camera…', color: colors.brandPressed, enabled: false, loading: true };
-    case 'preview':
-      return { label: 'Upload Photo', color: colors.brand, enabled: true, loading: false };
-    case 'uploading':
-      return { label: 'Uploading…', color: colors.brandPressed, enabled: false, loading: true };
-    case 'succeeded':
-      return {
-        label: isMarkingComplete ? 'Marking Complete…' : 'Mark Complete',
-        color: colors.statusComplete,
-        enabled: !isMarkingComplete,
-        loading: isMarkingComplete,
-      };
-    case 'failed':
-      return { label: 'Retry Photo', color: colors.statusFailed, enabled: true, loading: false };
-    default:
-      return assertNever(state);
-  }
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -340,30 +289,6 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-
-  nav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,  // DESIGN §2.4 — standard page margin
-    paddingVertical: 12,    // DESIGN §1.3 — on-grid
-  },
-  navBack: {
-    fontSize: 15,
-    color: colors.brand,
-    fontWeight: '600',
-  },
-  typePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  typePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
 
   typeStripe: {
     height: 4,
