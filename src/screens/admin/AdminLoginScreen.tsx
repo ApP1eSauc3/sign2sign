@@ -2,10 +2,8 @@ import { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -17,6 +15,8 @@ import { AuthService } from '../../services/AuthService';
 import { useAppStore } from '../../stores/useAppStore';
 import { AppMode } from '../../data/SignJob';
 import { colors } from '../../utils/colors';
+import { TextInputField } from '../components/TextInputField';
+import { PrimaryButton } from '../components/PrimaryButton';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'AdminLogin'>;
 
@@ -68,11 +68,9 @@ export default function AdminLoginScreen({ navigation }: Props) {
       >
         <Text style={styles.formTitle}>Admin Login</Text>
 
-        <Text style={styles.label} nativeID="adminEmailLabel">Email</Text>
-        <TextInput
-          style={styles.input}
+        <TextInputField
+          label="Email"
           placeholder="you@sign2site.com.au"
-          placeholderTextColor={colors.adminTextHint}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
@@ -80,23 +78,19 @@ export default function AdminLoginScreen({ navigation }: Props) {
           textContentType="username"
           autoComplete="email"
           accessibilityLabel="Email address"
-          accessibilityLabelledBy="adminEmailLabel"
           value={email}
           onChangeText={setEmail}
         />
 
-        <Text style={styles.label} nativeID="adminPasswordLabel">Password</Text>
-        <TextInput
-          style={styles.input}
+        <TextInputField
+          label="Password"
           placeholder="Password"
-          placeholderTextColor={colors.adminTextHint}
           secureTextEntry
           returnKeyType="go"
           onSubmitEditing={handleLogin}
           textContentType="password"
           autoComplete="current-password"
           accessibilityLabel="Password"
-          accessibilityLabelledBy="adminPasswordLabel"
           value={password}
           onChangeText={setPassword}
         />
@@ -107,18 +101,12 @@ export default function AdminLoginScreen({ navigation }: Props) {
           </View>
         )}
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonLoading]}
+        <PrimaryButton
+          label="Log In"
           onPress={handleLogin}
-          disabled={loading}
-          activeOpacity={0.85}
-        >
-          {loading ? (
-            <ActivityIndicator color={colors.white} />
-          ) : (
-            <Text style={styles.buttonText}>Log In</Text>
-          )}
-        </TouchableOpacity>
+          loading={loading}
+          style={styles.button}
+        />
 
         <TouchableOpacity
           style={styles.backButton}
@@ -175,25 +163,6 @@ const styles = StyleSheet.create({
     color: colors.adminText,
     marginBottom: 24,  // DESIGN §1.3 — on-grid (was 28, off-grid)
   },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.adminTextSecondary,
-    marginBottom: 6,
-  },
-  input: {
-    width: '100%',
-    height: 56,                // 56pt — field ops minimum touch target
-    borderWidth: 1,
-    borderColor: colors.adminBorder,
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    color: colors.adminText,
-    backgroundColor: colors.white,
-    marginBottom: 20,
-  },
-
   // Error
   errorBox: {
     backgroundColor: colors.statusFailedBg,
@@ -209,21 +178,7 @@ const styles = StyleSheet.create({
 
   // CTA — brand blue fills entirely, white text
   button: {
-    width: '100%',
-    height: 56,
-    backgroundColor: colors.brand,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginTop: 4,
-  },
-  buttonLoading: {
-    backgroundColor: colors.brandPressed,
-  },
-  buttonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '600',
   },
 
   // Back

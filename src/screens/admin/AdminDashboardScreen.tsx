@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  TextInput,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
@@ -21,6 +20,10 @@ import { useAppStore } from '../../stores/useAppStore';
 import { AppMode, DailyCode } from '../../data/SignJob';
 import { GoogleAuthService } from '../../services/GoogleAuthService';
 import { colors } from '../../utils/colors';
+import { AdminCard } from '../components/AdminCard';
+import { TextInputField } from '../components/TextInputField';
+import { PrimaryButton } from '../components/PrimaryButton';
+import { EmptyState } from '../components/EmptyState';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'AdminDashboard'>;
 
@@ -213,7 +216,7 @@ export default function AdminDashboardScreen({ navigation }: Props) {
         </View>
 
         {/* Driver count stepper */}
-        <View style={styles.stepperRow}>
+        <AdminCard style={styles.stepperRow}>
           <Text style={styles.stepperLabel}>Drivers</Text>
           <View style={styles.stepper}>
             <TouchableOpacity
@@ -242,31 +245,30 @@ export default function AdminDashboardScreen({ navigation }: Props) {
               <Text style={styles.stepperButtonText} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">+</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </AdminCard>
 
         {isLoadingCodes ? (
-          <View style={styles.sectionCard}>
+          <AdminCard>
             <ActivityIndicator color={colors.brand} />
-          </View>
+          </AdminCard>
         ) : loadCodesError ? (
-          <View style={styles.sectionCard}>
+          <AdminCard>
             <Text style={[styles.emptyText, { color: colors.adminError }]}>{loadCodesError}</Text>
             <Text style={styles.emptyHint}>Check your connection and pull to refresh.</Text>
-          </View>
+          </AdminCard>
         ) : codes.length === 0 ? (
-          <View style={styles.sectionCard}>
-            <Text style={styles.emptyText}>No codes generated yet today.</Text>
-            <Text style={styles.emptyHint}>Tap Generate to create driver codes.</Text>
-          </View>
+          <AdminCard>
+            <EmptyState
+              variant="admin"
+              title="No codes generated yet today."
+              hint="Tap Generate to create driver codes."
+            />
+          </AdminCard>
         ) : (
           <View style={styles.codesGrid}>
             {codes.map((c) => (
               <TouchableOpacity
                 key={c.id}
-                style={[
-                  styles.codeCard,
-                  selectedRouteCodeId === c.id && styles.codeCardSelected,
-                ]}
                 onPress={() =>
                   setSelectedRouteCodeId(selectedRouteCodeId === c.id ? null : c.id)
                 }
@@ -274,12 +276,15 @@ export default function AdminDashboardScreen({ navigation }: Props) {
                 accessibilityLabel={`Driver ${c.driverSlot}, code ${c.code.split('').join(' ')}`}
                 accessibilityState={{ selected: selectedRouteCodeId === c.id }}
                 accessibilityHint="Selects this driver to receive imported jobs"
+                style={styles.codeCardWrap}
               >
-                <Text style={styles.codeSlot}>DRIVER {c.driverSlot}</Text>
-                <Text style={styles.codeValue}>{c.code}</Text>
-                {selectedRouteCodeId === c.id && (
-                  <Text style={styles.codeSelectedLabel}>Selected for import</Text>
-                )}
+                <AdminCard selected={selectedRouteCodeId === c.id}>
+                  <Text style={styles.codeSlot}>DRIVER {c.driverSlot}</Text>
+                  <Text style={styles.codeValue}>{c.code}</Text>
+                  {selectedRouteCodeId === c.id && (
+                    <Text style={styles.codeSelectedLabel}>Selected for import</Text>
+                  )}
+                </AdminCard>
               </TouchableOpacity>
             ))}
           </View>
@@ -298,34 +303,31 @@ export default function AdminDashboardScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
 
-        <View style={[styles.sectionCard, { marginTop: 10 }]}>
-          <Text style={styles.fieldLabel}>Google Sheet ID</Text>
-          <TextInput
-            style={styles.input}
+        <AdminCard style={{ marginTop: 10 }}>
+          <TextInputField
+            variant="compact"
+            label="Google Sheet ID"
             value={sheetId}
             onChangeText={setSheetId}
             placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
-            placeholderTextColor={colors.adminTextTertiary}
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <Text style={styles.fieldLabel}>Sheet Tab Name</Text>
-          <TextInput
-            style={styles.input}
+          <TextInputField
+            variant="compact"
+            label="Sheet Tab Name"
             value={sheetName}
             onChangeText={setSheetName}
             placeholder="Sheet44"
-            placeholderTextColor={colors.adminTextTertiary}
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <Text style={styles.fieldLabel}>Import Date</Text>
-          <TextInput
-            style={styles.input}
+          <TextInputField
+            variant="compact"
+            label="Import Date"
             value={importDate}
             onChangeText={setImportDate}
             placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.adminTextTertiary}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="numeric"
@@ -369,26 +371,18 @@ export default function AdminDashboardScreen({ navigation }: Props) {
             </Text>
           )}
 
-          <TouchableOpacity
-            style={[
-              styles.importButton,
-              (!sheetId.trim() || !sheetName.trim() || !selectedRouteCodeId || isImporting) &&
-                styles.importButtonDisabled,
-            ]}
+          <PrimaryButton
+            label="Import Jobs from Sheet"
+            size="admin"
+            loading={isImporting}
+            disabled={!sheetId.trim() || !sheetName.trim() || !selectedRouteCodeId}
             onPress={handleImportJobs}
-            disabled={!sheetId.trim() || !sheetName.trim() || !selectedRouteCodeId || isImporting}
-          >
-            {isImporting ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Text style={styles.importButtonText}>Import Jobs from Sheet</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+          />
+        </AdminCard>
 
         {/* ── Active Routes ───────────────────────────────────────────── */}
         <Text style={[styles.sectionLabel, { marginTop: 28 }]}>ACTIVE ROUTES</Text>
-        <View style={styles.sectionCard}>
+        <AdminCard>
           {codes.length === 0 ? (
             <Text style={styles.emptyText}>No active routes today.</Text>
           ) : (
@@ -424,7 +418,7 @@ export default function AdminDashboardScreen({ navigation }: Props) {
               </TouchableOpacity>
             ))
           )}
-        </View>
+        </AdminCard>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -491,13 +485,6 @@ const styles = StyleSheet.create({
   sectionActionConnected: { borderColor: colors.adminSuccess, backgroundColor: colors.adminSuccessBg },
   sectionActionText: { fontSize: 13, fontWeight: '600', color: colors.brand },
 
-  sectionCard: {
-    backgroundColor: colors.adminSurface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.adminDivider,
-    padding: 16,
-  },
   emptyText: { fontSize: 15, color: colors.adminTextTertiary },
   emptyHint: { fontSize: 13, color: colors.adminTextHint, marginTop: 4 },
 
@@ -507,18 +494,9 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
-  codeCard: {
-    backgroundColor: colors.adminSurface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.adminCardBorder,
-    padding: 14,
+  codeCardWrap: {
     minWidth: '47%',
     flex: 1,
-  },
-  codeCardSelected: {
-    borderColor: colors.brand,
-    backgroundColor: colors.adminSelectedBg,
   },
   codeSlot: {
     fontSize: 11,
@@ -541,24 +519,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  // Import form
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.adminTextSecondary,
-    marginBottom: 6,
-  },
-  input: {
-    height: 44,
-    borderWidth: 1,
-    borderColor: colors.adminBorder,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    color: colors.adminText,
-    backgroundColor: colors.white,
-    marginBottom: 10,
-  },
   // Sheet format reference
   sheetFormatCard: {
     backgroundColor: colors.adminDivider,
@@ -595,27 +555,13 @@ const styles = StyleSheet.create({
   importResult: { fontSize: 14, fontWeight: '500', marginBottom: 12 },
   importResultSuccess: { color: colors.adminSuccess },
   importResultError: { color: colors.adminError },
-  importButton: {
-    height: 48,
-    backgroundColor: colors.brand,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  importButtonDisabled: { opacity: 0.4 },
-  importButtonText: { color: colors.white, fontSize: 15, fontWeight: '600' },
 
   // Driver count stepper
   stepperRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.adminSurface,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.adminCardBorder,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 12,   // overrides AdminCard's uniform padding — matches original paddingHorizontal:16/paddingVertical:12
     marginBottom: 10,
   },
   stepperLabel: {

@@ -11,9 +11,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { DriverStackParamList } from '../../navigation/DriverStack';
 import { useDriverSession } from '../../stores/useDriverSession';
 import { useAppStore } from '../../stores/useAppStore';
-import { SignJob, JobUploadState, AppMode } from '../../data/SignJob';
+import { AppMode } from '../../data/SignJob';
 import { colors } from '../../utils/colors';
 import { OfflineBanner } from '../OfflineBanner';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { JobCard } from '../components/JobCard';
+import { EmptyState } from '../components/EmptyState';
 
 type Props = NativeStackScreenProps<DriverStackParamList, 'DriverRoute'>;
 
@@ -57,30 +60,24 @@ export default function DriverRouteScreen({ navigation }: Props) {
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.mapButton}
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.mapButtonText}>← Map</Text>
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Today's Route</Text>
-          <Text style={styles.headerSub}>
-            DRIVER {session.driverSlot}  ·  {done}/{total} COMPLETE
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={styles.exitButton}
-          onPress={handleSignOut}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.exitText}>Exit</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        variant="driver"
+        boxed
+        backLabel="Map"
+        onBack={() => navigation.goBack()}
+        title="Today's Route"
+        subtitle={`DRIVER ${session.driverSlot}  ·  ${done}/${total} COMPLETE`}
+        trailing={
+          <TouchableOpacity
+            style={styles.exitButton}
+            onPress={handleSignOut}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Text style={styles.exitText}>Exit</Text>
+          </TouchableOpacity>
+        }
+      />
 
-      <View style={styles.divider} />
       <OfflineBanner />
 
       {/* Progress bar */}
@@ -117,98 +114,33 @@ export default function DriverRouteScreen({ navigation }: Props) {
           styles.list,
           { paddingBottom: insets.bottom + 24 },
         ]}
-        renderItem={({ item }) => (
-          <JobCard
-            job={item}
-            uploadState={uploadStates[item.id] ?? { status: 'idle' }}
-            onPress={() => navigation.navigate('DriverJob', { jobId: item.id })}
-          />
-        )}
+        renderItem={({ item }) => {
+          const uploadState = uploadStates[item.id] ?? { status: 'idle' };
+          const photoTaken = uploadState.status === 'succeeded' || !!item.photoKey;
+          return (
+            <JobCard
+              job={item}
+              uploadState={uploadState}
+              dimWhenComplete
+              onPress={() => navigation.navigate('DriverJob', { jobId: item.id })}
+              footer={
+                <Text style={[styles.photoLabel, { color: photoTaken ? colors.statusComplete : colors.textDisabled }]}>
+                  {photoTaken ? 'Photo captured' : 'Photo required'}
+                </Text>
+              }
+            />
+          );
+        }}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No jobs assigned</Text>
-            <Text style={styles.emptyHint}>Your dispatcher hasn't added any jobs to this route yet. Check back soon.</Text>
-          </View>
+          <EmptyState
+            variant="driver"
+            title="No jobs assigned"
+            hint="Your dispatcher hasn't added any jobs to this route yet. Check back soon."
+          />
         }
       />
     </View>
-  );
-}
-
-// ─── Job card ────────────────────────────────────────────────────────────────
-
-function JobCard({
-  job,
-  uploadState,
-  onPress,
-}: {
-  job: SignJob;
-  uploadState: JobUploadState;
-  onPress: () => void;
-}) {
-  const statusLabel = job.isComplete
-    ? 'COMPLETE'
-    : uploadState.status === 'uploading'
-    ? 'UPLOADING'
-    : uploadState.status === 'failed'
-    ? 'FAILED'
-    : 'PENDING';
-
-  const statusColors = {
-    COMPLETE: { bg: colors.statusCompleteBg, text: colors.statusComplete },
-    UPLOADING: { bg: colors.statusProgressBg, text: colors.statusProgress },
-    FAILED: { bg: colors.statusFailedBg, text: colors.statusFailed },
-    PENDING: { bg: colors.statusPendingBg, text: colors.statusPending },
-  }[statusLabel];
-
-  const photoTaken = uploadState.status === 'succeeded' || !!job.photoKey;
-  const photoLabel = photoTaken ? 'Photo captured' : 'Photo required';
-  const photoLabelColor = photoTaken ? colors.statusComplete : colors.textDisabled;
-
-  return (
-    <TouchableOpacity
-      style={[
-        styles.card,
-        { borderLeftColor: job.jobType === 'install' ? colors.install : colors.removal },
-        job.isComplete && styles.cardComplete,
-      ]}
-      onPress={onPress}
-      activeOpacity={0.75}
-      accessibilityRole="button"
-      accessibilityLabel={`${job.jobType} job at ${job.address}, status ${statusLabel.toLowerCase()}, ${photoLabel.toLowerCase()}`}
-      accessibilityHint="Opens the job detail to capture a photo and mark complete"
-    >
-      {/* Row 1: status + type */}
-      <View style={styles.cardRow}>
-        <View style={[styles.badge, { backgroundColor: statusColors.bg }]}>
-          <Text style={[styles.badgeText, { color: statusColors.text }]}>
-            {statusLabel}
-          </Text>
-        </View>
-        <View style={[styles.typePill, { borderColor: job.jobType === 'install' ? colors.install : colors.removal }]}>
-          <Text style={[styles.typePillText, { color: job.jobType === 'install' ? colors.install : colors.removal }]}>
-            {job.jobType.toUpperCase()}
-          </Text>
-        </View>
-      </View>
-
-      {/* Row 2: address */}
-      <Text style={[styles.address, job.isComplete && styles.addressComplete]}>
-        {job.address}
-      </Text>
-
-      {/* Row 3: client + agent */}
-      <Text style={styles.meta}>
-        {job.clientName}
-        {job.agentName ? `  ·  ${job.agentName}` : ''}
-      </Text>
-
-      {/* Row 4: photo state */}
-      <Text style={[styles.photoLabel, { color: photoLabelColor }]}>
-        {photoLabel}
-      </Text>
-    </TouchableOpacity>
   );
 }
 
@@ -226,34 +158,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,  // DESIGN §2.4 — standard page margin
     paddingVertical: 16,
   },
-  mapButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  mapButtonText: {
-    color: colors.brand,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 20,           // DESIGN §1.7 — reduced from 24 to fit 3-column header
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  headerSub: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.brand,
-    letterSpacing: 1.2,
-    marginTop: 2,
-  },
   exitButton: {
     paddingHorizontal: 14,
     paddingVertical: 7,
@@ -265,10 +169,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '600',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
   },
   progressTrack: {
     height: 3,
@@ -321,80 +221,9 @@ const styles = StyleSheet.create({
     height: 8,
   },
 
-  // Card
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 10,         // DESIGN §1.6 — standard card
-    borderLeftWidth: 4,
-    padding: 16,
-    minHeight: 64,
-  },
-  cardComplete: {
-    backgroundColor: colors.bg,  // DESIGN §1.5 — surface drops to base for completed cards; text tokens handle legibility
-  },
-  cardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  typePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  typePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  address: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    lineHeight: 24,
-    marginBottom: 4,
-  },
-  addressComplete: {
-    color: colors.textSecondary,
-  },
-  meta: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
   photoLabel: {
     fontSize: 13,
     fontWeight: '500',
-  },
-
-  // Empty state
-  emptyState: {
-    paddingTop: 48,            // DESIGN §1.3 — breathing room
-    paddingHorizontal: 24,
-    alignItems: 'center',
-  },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  emptyHint: {
-    fontSize: 15,
-    color: colors.textDisabled,
-    textAlign: 'center',
-    lineHeight: 22,
+    marginTop: 4,
   },
 });

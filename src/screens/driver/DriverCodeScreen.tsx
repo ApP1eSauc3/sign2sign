@@ -2,10 +2,8 @@ import { useEffect, useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -16,6 +14,8 @@ import { AppMode } from '../../data/SignJob';
 import { colors } from '../../utils/colors';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { DriverStackParamList } from '../../navigation/DriverStack';
+import { TextInputField } from '../components/TextInputField';
+import { PrimaryButton } from '../components/PrimaryButton';
 
 type Props = NativeStackScreenProps<DriverStackParamList, 'DriverCode'>;
 
@@ -60,42 +60,30 @@ export default function DriverCodeScreen({ navigation }: Props) {
         <Text style={styles.hint}>Your dispatcher will give you a 6-digit code each morning.</Text>
 
         {/* Code input — large, centred, numeric */}
-        <TextInput
-          style={[styles.codeInput, codeError ? styles.codeInputError : null]}
+        <TextInputField
+          variant="driverCode"
           value={code}
           onChangeText={(t) => setCode(t.replace(/[^0-9]/g, '').slice(0, 6))}
           keyboardType="number-pad"
           maxLength={6}
           placeholder="000000"
-          placeholderTextColor={colors.textDisabled}
           returnKeyType="go"
           onSubmitEditing={handleSubmit}
           autoFocus
           accessibilityLabel="Six-digit daily route code"
           accessibilityHint="Enter the six digits your dispatcher gave you today"
           textContentType="oneTimeCode"
+          error={codeError ?? undefined}
         />
 
-        {codeError && <Text style={styles.errorText}>{codeError}</Text>}
-
-        <TouchableOpacity
-          style={[
-            styles.button,
-            (code.length !== 6 || isLoadingSession) && styles.buttonDisabled,
-          ]}
+        <PrimaryButton
+          label="Start Route"
+          size="gloved"
+          disabled={code.length !== 6}
+          loading={isLoadingSession}
           onPress={handleSubmit}
-          disabled={code.length !== 6 || isLoadingSession}
-          activeOpacity={0.85}
-        >
-          {isLoadingSession ? (
-            <ActivityIndicator color={colors.white} />
-          ) : (
-            <Text style={[
-              styles.buttonText,
-              (code.length !== 6) && styles.buttonTextDisabled,
-            ]}>Start Route</Text>
-          )}
-        </TouchableOpacity>
+          style={styles.button}
+        />
 
         <TouchableOpacity
           style={styles.backButton}
@@ -151,46 +139,8 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 32,  // DESIGN §1.3 — on-grid (was 36, off-grid)
   },
-  codeInput: {
-    height: 80,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.textPrimary,
-    fontSize: 36,
-    fontWeight: '700',
-    textAlign: 'center',
-    letterSpacing: 12,
-    marginBottom: 16,
-  },
-  codeInputError: {
-    borderColor: colors.statusFailed,
-  },
-  errorText: {
-    color: colors.statusFailed,
-    fontSize: 15,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
   button: {
-    height: 64,
-    backgroundColor: colors.brand,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginTop: 8,
-  },
-  buttonDisabled: {
-    backgroundColor: colors.surfaceActive,  // DESIGN §1.5 — disabled CTA, never opacity
-  },
-  buttonText: {
-    color: colors.white,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  buttonTextDisabled: {
-    color: colors.textDisabled,  // DESIGN §1.4 — disabled text token
   },
   backButton: {
     alignSelf: 'center',

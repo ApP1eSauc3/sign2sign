@@ -1,17 +1,14 @@
 import { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Google from 'expo-auth-session/providers/google';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AdminStackParamList } from '../../navigation/AdminStack';
 import { GoogleAuthService } from '../../services/GoogleAuthService';
 import { colors } from '../../utils/colors';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { AdminCard } from '../components/AdminCard';
+import { PrimaryButton } from '../components/PrimaryButton';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'GoogleConnect'>;
 
@@ -96,14 +93,7 @@ export default function GoogleConnectScreen({ navigation }: Props) {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.nav}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.navBack}>← Back</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader title="Connect Google" onBack={() => navigation.goBack()} variant="admin" />
 
       <View style={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
         <Text style={styles.title}>Connect Google Account</Text>
@@ -112,13 +102,13 @@ export default function GoogleConnectScreen({ navigation }: Props) {
           account once and your spreadsheets will be accessible for import.
         </Text>
 
-        <View style={styles.scopeCard}>
+        <AdminCard style={styles.scopeCard}>
           <Text style={styles.scopeLabel}>PERMISSIONS REQUESTED</Text>
           <Text style={styles.scopeItem}>• Read-only access to Google Sheets</Text>
           <Text style={styles.scopeNote}>
             Sign2Sign cannot modify your spreadsheets.
           </Text>
-        </View>
+        </AdminCard>
 
         {error && (
           <View style={styles.errorBox}>
@@ -126,8 +116,10 @@ export default function GoogleConnectScreen({ navigation }: Props) {
           </View>
         )}
 
-        <TouchableOpacity
-          style={[styles.button, (!request || isConnecting) && styles.buttonDisabled]}
+        <PrimaryButton
+          label="Connect with Google"
+          loading={isConnecting}
+          disabled={!request}
           onPress={() => {
             // On Electron, popup windows are intercepted and opened in the system
             // browser by main.js's setWindowOpenHandler. promptAsync() would open a
@@ -138,15 +130,7 @@ export default function GoogleConnectScreen({ navigation }: Props) {
               void promptAsync();
             }
           }}
-          disabled={!request || isConnecting}
-          activeOpacity={0.85}
-        >
-          {isConnecting ? (
-            <ActivityIndicator color={colors.white} />
-          ) : (
-            <Text style={styles.buttonText}>Connect with Google</Text>
-          )}
-        </TouchableOpacity>
+        />
       </View>
     </View>
   );
@@ -154,21 +138,12 @@ export default function GoogleConnectScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.white },
-  nav: { paddingHorizontal: 24, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.adminDivider },
-  navBack: { fontSize: 15, fontWeight: '600', color: colors.brand },
 
   content: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
   title: { fontSize: 22, fontWeight: '700', color: colors.adminText, marginBottom: 12 },
   body: { fontSize: 15, color: colors.adminTextSecondary, lineHeight: 22, marginBottom: 28 },
 
-  scopeCard: {
-    backgroundColor: colors.adminSurface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.adminCardBorder,
-    padding: 16,
-    marginBottom: 28,
-  },
+  scopeCard: { marginBottom: 28 },
   scopeLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -186,14 +161,4 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: { color: colors.statusFailed, fontSize: 14, fontWeight: '500' },
-
-  button: {
-    height: 56,
-    backgroundColor: colors.brand,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonDisabled: { opacity: 0.4 },
-  buttonText: { color: colors.white, fontSize: 16, fontWeight: '600' },
 });
