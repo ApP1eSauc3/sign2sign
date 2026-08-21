@@ -119,7 +119,7 @@ sign2sign/
     │   ├── JobPhotoService.ts      Camera capture, Storage upload, mark complete
     │   ├── GoogleSheetsService.ts  Job import from Google Sheets
     │   ├── GoogleAuthService.ts    OAuth2 token management for Sheets
-    │   ├── RouteService.ts         Driving-route optimisation (Google Directions; falls back to straight lines)
+    │   ├── RouteService.ts         Driving-route optimisation (Google Directions; straight-line fallback)
     │   └── OfflineQueueService.ts  AsyncStorage queue for offline operations
     ├── stores/
     │   ├── useAppStore.ts          AppMode — root navigation signal
@@ -326,6 +326,8 @@ EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB=...
 
 # Optional — Google Directions for the driver map's optimised route.
 # Without it, RouteService falls back to straight-line connections.
+# Note: Directions allows at most 25 intermediate waypoints, so routes of
+# 28+ jobs also fall back to straight lines even with the key set.
 EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=...
 ```
 
