@@ -3,9 +3,19 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 export type AuthError = { message: string };
 
 export const AuthService = {
+  // Every failure returns the same string. Supabase's own "Invalid login
+  // credentials" is already generic, but "Email not confirmed" is not — it
+  // confirms the address is registered, which turns the login form into a
+  // membership oracle. One message for every failure closes that.
+  //
+  // The real reason still needs to reach someone, so it goes to the console
+  // for now. When security-event logging lands this is the call site that
+  // should emit auth.login.failed with a reason class.
   async signIn(email: string, password: string): Promise<AuthError | null> {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return error ? { message: error.message } : null;
+    if (!error) return null;
+    console.warn('[auth] sign-in failed:', error.message);
+    return { message: 'Invalid email or password.' };
   },
 
   async signOut(): Promise<void> {

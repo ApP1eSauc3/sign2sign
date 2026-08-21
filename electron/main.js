@@ -365,6 +365,7 @@ function registerAppProtocol() {
         headers: {
           'content-type': 'text/html; charset=utf-8',
           'content-security-policy': buildContentSecurityPolicy({ dev: false }),
+          'x-content-type-options': 'nosniff',
         },
       });
     }
@@ -372,7 +373,14 @@ function registerAppProtocol() {
     try {
       const data = await fs.promises.readFile(resolved);
       return new Response(data, {
-        headers: { 'content-type': MIME_TYPES[ext] || 'application/octet-stream' },
+        headers: {
+          'content-type': MIME_TYPES[ext] || 'application/octet-stream',
+          // Pin the declared type. Without nosniff the renderer may sniff a
+          // response and execute it as something other than what we served —
+          // which turns any asset we get the MIME mapping wrong for into a
+          // script-execution path.
+          'x-content-type-options': 'nosniff',
+        },
       });
     } catch {
       return new Response('Not found', { status: 404 });

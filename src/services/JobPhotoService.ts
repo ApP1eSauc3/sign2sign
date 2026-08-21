@@ -60,26 +60,37 @@ export const JobPhotoService = {
 
     const asset = result.assets[0];
 
-    // Resize before returning — reduces upload size from 4–12MB to ~300–600KB
-    // on a typical phone camera without visible quality loss at sign-photo scale
+    // Always re-encode, even when no resize is needed.
+    //
+    // Two jobs, one call. (1) Resizing cuts a 4–12MB camera frame to
+    // ~300–600KB with no visible loss at sign-photo scale. (2) Re-encoding
+    // drops the EXIF block, which on a camera capture carries the phone's
+    // own GPS fix. This app records location deliberately, in its own
+    // columns, captured at upload time — an unmanaged second copy riding
+    // inside the stored file is exposure we get nothing for.
+    //
+    // Previously the re-encode sat behind a needsResize check, so any photo
+    // already within MAX_PHOTO_DIMENSION uploaded as the raw camera asset
+    // with its EXIF intact.
     const needsResize =
       asset.width > MAX_PHOTO_DIMENSION || asset.height > MAX_PHOTO_DIMENSION;
+    const isLandscape = asset.width >= asset.height;
 
-    if (needsResize) {
-      const isLandscape = asset.width >= asset.height;
-      const resized = await ImageManipulator.manipulateAsync(
-        asset.uri,
-        [
+    const actions: ImageManipulator.Action[] = needsResize
+      ? [
           isLandscape
             ? { resize: { width: MAX_PHOTO_DIMENSION } }
             : { resize: { height: MAX_PHOTO_DIMENSION } },
-        ],
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-      );
-      return resized.uri;
-    }
+        ]
+      : [];
 
-    return asset.uri;
+    // An empty action list still re-encodes — that is the metadata strip.
+    const processed = await ImageManipulator.manipulateAsync(asset.uri, actions, {
+      compress: 0.8,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+
+    return processed.uri;
   },
 
   // Upload photo to Supabase Storage and update the job record.

@@ -1,0 +1,62 @@
+# Sign2Sign — CI
+#
+# Closes PT1 #20 from docs/LAUNCH_SECURITY_AUDIT_2026_08_18.md. Dependabot was
+# already opening dependency PRs, but nothing ran the audit or the tests, so a
+# regression only surfaced when someone happened to run them locally.
+#
+# Deliberately three cheap jobs rather than one: a failing audit should not hide
+# a failing test run, and vice versa — you want to see both in one glance.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Advisories land after you merge, not before. A weekly run catches a
+  # dependency that went bad while nothing in the repo changed.
+  schedule:
+    - cron: '0 0 * * 1'
+
+jobs:
+  test:
+    name: Tests + types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      # npm ci, not npm install — installs exactly the committed lockfile.
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Fails the job on high/critical. As of 2026-08-18 this repo does NOT
+      # pass — see the audit doc: most findings are build tooling that never
+      # ships, and the one that reaches a shipped artifact is
+      # electron-updater -> builder-util-runtime. Triage that first; until
+      # then this job is the visible reminder, which is the point.
+      - run: npm audit --audit-level=high
+
+  electron:
+    name: Electron shell syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No install needed — this is a syntax check on the two shell files.
+      - run: npm run verify:electron

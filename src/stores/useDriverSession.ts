@@ -155,14 +155,10 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
     try {
       const isOnline = await OfflineQueueService.isOnline();
       if (!isOnline) {
-        await OfflineQueueService.enqueue({
-          type: 'upload',
-          jobId,
-          imageUri,
-          location,
-          routeCode,
-          queuedAt: Date.now(),
-        });
+        await OfflineQueueService.enqueue(
+          { type: 'upload', jobId, imageUri, location, queuedAt: Date.now() },
+          routeCode
+        );
         setUploadState(jobId, {
           status: 'failed',
           message: 'No connection — photo queued and will upload automatically when online.',
@@ -237,7 +233,10 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
       const routeCode = session.routeCode;
       const isOnline = await OfflineQueueService.isOnline();
       if (!isOnline) {
-        await OfflineQueueService.enqueue({ type: 'markComplete', jobId, routeCode, queuedAt: Date.now() });
+        await OfflineQueueService.enqueue(
+          { type: 'markComplete', jobId, queuedAt: Date.now() },
+          routeCode
+        );
         // Optimistically mark complete locally — will sync when online
         set((s) => {
           if (!s.session) return s;
@@ -285,10 +284,10 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
   flushOfflineQueue: async () => {
     const { setUploadState } = get();
     await OfflineQueueService.flush({
-      onUpload: async (op) => {
+      onUpload: async (op, routeCode) => {
         setUploadState(op.jobId, { status: 'uploading' });
         try {
-          const result = await JobPhotoService.uploadPhoto(op.jobId, op.imageUri, op.location, op.routeCode);
+          const result = await JobPhotoService.uploadPhoto(op.jobId, op.imageUri, op.location, routeCode);
           setUploadState(op.jobId, { status: 'succeeded', photoKey: result.photoKey });
         } catch (err: unknown) {
           // Let the queue service know this op failed (it re-queues for next flush).
@@ -300,9 +299,9 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
           throw err; // propagate so OfflineQueueService.flush records this as failed
         }
       },
-      onMarkComplete: async (op) => {
+      onMarkComplete: async (op, routeCode) => {
         try {
-          await JobPhotoService.markJobComplete(op.jobId, op.routeCode);
+          await JobPhotoService.markJobComplete(op.jobId, routeCode);
         } catch (err: unknown) {
           // A queued mark-complete was previously shown to the driver as an
           // optimistic success — a silent flush failure here means the admin

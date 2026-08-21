@@ -32,6 +32,9 @@ const ipAttempts = new Map<string, { count: number; windowStart: number }>();
 const WINDOW_MS = 60_000;
 const MAX_PER_WINDOW = 30; // ~one attempt every 2s — generous for legitimate use
 
+// {"code":"123456","client_id":"<uuid>"} is ~60 bytes. 1 KiB is room to spare.
+const MAX_BODY_BYTES = 1024;
+
 function checkIpThrottle(ip: string): boolean {
   const now = Date.now();
   const entry = ipAttempts.get(ip);
@@ -84,9 +87,27 @@ Deno.serve(async (req) => {
     );
   }
 
+  // Cap the body before parsing it. The only legitimate payload here is a
+  // six-digit code and a UUID — a few dozen bytes.
+  //
+  // Two checks, because one is not enough. Content-Length rejects the common
+  // oversized case without buffering anything, but a chunked request sends no
+  // Content-Length at all, so the header check alone is trivially bypassed.
+  // The length check after reading catches that. Neither is the real ceiling
+  // for a genuinely huge body — the Supabase Edge gateway is — but together
+  // they stop this function from parsing megabytes of attacker JSON.
+  const declaredLength = Number(req.headers.get('content-length') ?? '0');
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+    return jsonResponse({ error: 'payload_too_large' }, 413);
+  }
+
   let payload: { code?: unknown; client_id?: unknown };
   try {
-    payload = await req.json();
+    const raw = await req.text();
+    if (raw.length > MAX_BODY_BYTES) {
+      return jsonResponse({ error: 'payload_too_large' }, 413);
+    }
+    payload = JSON.parse(raw);
   } catch {
     return jsonResponse({ error: 'invalid_json' }, 400);
   }
@@ -113,7 +134,11 @@ Deno.serve(async (req) => {
         429
       );
     }
-    return jsonResponse({ error: 'rpc_error', message: error.message }, 500);
+    // Never hand a raw Postgres error to an unauthenticated caller — the
+    // text names functions, columns and constraints, which is free
+    // reconnaissance. Log the detail, return a generic failure.
+    console.error('[validate-code] rpc_error:', error.message);
+    return jsonResponse({ error: 'rpc_error', message: 'Could not validate the code. Try again.' }, 500);
   }
 
   // RPC returns null for invalid/expired code, JSONB payload on success.

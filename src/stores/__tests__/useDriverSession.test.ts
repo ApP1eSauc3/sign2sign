@@ -261,8 +261,15 @@ describe('markComplete — gated on the photo upload', () => {
     const ok = await useDriverSession.getState().markComplete('job-1');
 
     expect(ok).toBe(true);
+    // The route code is passed as a separate argument and stored in
+    // secureStorage — it is deliberately NOT part of the persisted op.
     expect(OfflineQueueService.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'markComplete', jobId: 'job-1', routeCode: '123456' })
+      expect.objectContaining({ type: 'markComplete', jobId: 'job-1' }),
+      '123456'
+    );
+    expect(OfflineQueueService.enqueue).not.toHaveBeenCalledWith(
+      expect.objectContaining({ routeCode: expect.anything() }),
+      expect.anything()
     );
     expect(mockMarkComplete).not.toHaveBeenCalled();
     expect(useDriverSession.getState().getJob('job-1')?.isComplete).toBe(true);
@@ -292,10 +299,10 @@ describe('flushOfflineQueue — mark-complete failure surfacing', () => {
   // Mimic the real flush contract: call the handler, record success/failure.
   function flushWithMarkCompleteOp(jobId: string) {
     mockFlush.mockImplementation(async (handlers: {
-      onMarkComplete: (op: { jobId: string; routeCode: string }) => Promise<void>;
+      onMarkComplete: (op: { jobId: string }, routeCode: string) => Promise<void>;
     }) => {
       try {
-        await handlers.onMarkComplete({ jobId, routeCode: '123456' });
+        await handlers.onMarkComplete({ jobId }, '123456');
         return { succeeded: [jobId], failed: [] };
       } catch {
         return { succeeded: [], failed: [jobId] };

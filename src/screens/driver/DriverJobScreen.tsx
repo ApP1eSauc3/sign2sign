@@ -147,7 +147,13 @@ export default function DriverJobScreen({ route, navigation }: Props) {
               `Sign: ${completedJob.signDescription}\n\n` +
               `Regards,\nSign2Sign`
             );
-            const mailtoUrl = `mailto:${completedJob.agentEmail}?subject=${subject}&body=${body}`;
+            // The address comes from the Google Sheet, so it is not ours to
+            // trust: an unencoded `?` or `&` in that cell would inject extra
+            // mailto parameters (cc, bcc, a different body) into the URL.
+            // `@` is left literal — it is legal unencoded in a mailto and
+            // percent-encoding it trips some mail handlers.
+            const agentAddress = encodeURIComponent(completedJob.agentEmail ?? '').replace(/%40/g, '@');
+            const mailtoUrl = `mailto:${agentAddress}?subject=${subject}&body=${body}`;
             // Drivers may have no mail account configured on the device —
             // mailto: then fails silently and the agent never hears. Detect
             // it and hand the driver the address instead of dropping the
