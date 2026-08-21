@@ -8,6 +8,28 @@ const GOOGLE_TOKEN_KEY = 'google_oauth_token';
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 const GEOCODING_API = 'https://maps.googleapis.com/maps/api/geocode/json';
 
+// Geocoding runs concurrently, but not unboundedly. The Geocoding API's
+// documented default quota is 25 QPS per project with a 3,000/minute ceiling
+// (https://developers.google.com/maps/documentation/geocoding/usage-and-billing,
+// verified 2026-08-21). Concurrency alone does not bound QPS — throughput is
+// limit/latency — so 5 in flight is paired with OVER_QUERY_LIMIT backoff below
+// rather than trusted on its own. It turns a 40-address import from ~40
+// sequential round trips into ~8 waves.
+const GEOCODE_CONCURRENCY = 5;
+const GEOCODE_MAX_RETRIES = 3;
+const GEOCODE_BACKOFF_BASE_MS = 200;
+
+// Sheets-derived strings go straight into text columns, which impose no bound
+// of their own — a single Google Sheets cell holds up to 50,000 characters, so
+// 500 rows of pasted junk is a ~25MB insert. These caps are generous against
+// real Australian address and agency data and exist to fail loudly, on the
+// offending row, rather than silently truncating (a truncated address geocodes
+// to the wrong place, which is worse than a refused import).
+const MAX_ADDRESS_CHARS = 300;
+const MAX_NAME_CHARS = 200;
+const MAX_NOTES_CHARS = 500;
+const MAX_SIZE_CHARS = 100;
+
 // Sign2Site actual sheet column layout:
 // A: Date (serial number with UNFORMATTED_VALUE), B: AGENCY, C: AGENT,
 // D: NOTES (install instructions), E: SIZE (sign dimensions), F: Printed (skip), G: ADDRESS
@@ -53,25 +75,123 @@ function detectJobType(agentText: string, notesText: string): JobType {
   return 'install';
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Retries only the transient shapes: the API's own OVER_QUERY_LIMIT status (a
+// 200 response body, not an HTTP error), HTTP 429, and 5xx. Everything else —
+// ZERO_RESULTS, REQUEST_DENIED, a bad key — is permanent, and retrying it just
+// spends quota before failing anyway.
+//
+// Before this, a single transient rate-limit response aborted the entire
+// import and the admin had to start over.
 async function geocodeAddress(
   address: string,
   apiKey: string
 ): Promise<{ latitude: number; longitude: number }> {
   const url = `${GEOCODING_API}?address=${encodeURIComponent(address)}&region=au&key=${apiKey}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Geocoding request failed (${response.status})`);
 
-  const json = await response.json() as {
-    status: string;
-    results: Array<{ geometry: { location: { lat: number; lng: number } } }>;
-  };
+  for (let attempt = 0; ; attempt++) {
+    const canRetry = attempt < GEOCODE_MAX_RETRIES;
 
-  if (json.status !== 'OK' || !json.results[0]) {
-    throw new Error(`Could not geocode "${address}" — status: ${json.status}`);
+    let response: Response;
+    try {
+      response = await fetch(url);
+    } catch (err) {
+      // fetch rejects only on network failure.
+      if (canRetry) {
+        await sleep(GEOCODE_BACKOFF_BASE_MS * 2 ** attempt);
+        continue;
+      }
+      throw new Error(`Geocoding request failed — check your connection.`);
+    }
+
+    if (response.status === 429 || response.status >= 500) {
+      if (canRetry) {
+        await sleep(GEOCODE_BACKOFF_BASE_MS * 2 ** attempt);
+        continue;
+      }
+      throw new Error(`Geocoding request failed (${response.status})`);
+    }
+
+    if (!response.ok) throw new Error(`Geocoding request failed (${response.status})`);
+
+    const json = await response.json() as {
+      status: string;
+      results: Array<{ geometry: { location: { lat: number; lng: number } } }>;
+    };
+
+    if (json.status === 'OVER_QUERY_LIMIT' && canRetry) {
+      await sleep(GEOCODE_BACKOFF_BASE_MS * 2 ** attempt);
+      continue;
+    }
+
+    if (json.status !== 'OK' || !json.results[0]) {
+      throw new Error(`Could not geocode "${address}" — status: ${json.status}`);
+    }
+
+    const { lat, lng } = json.results[0].geometry.location;
+    return { latitude: lat, longitude: lng };
+  }
+}
+
+// Bounded-concurrency map. Workers pull from a shared cursor, so a slow item
+// never idles the pool the way a fixed chunk-per-worker split would.
+//
+// On failure it stops dispatching new work but reports the error belonging to
+// the LOWEST index, not whichever rejected first. Import errors name a row
+// number, and a row number that changes between identical runs because of
+// network timing is a support call waiting to happen.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<{ results: R[]; failure?: { index: number; error: unknown } }> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  let failure: { index: number; error: unknown } | undefined;
+  // Separate from `failure` so the early-return guard does not narrow it away
+  // in the catch block below.
+  let aborted = false;
+
+  async function runWorker(): Promise<void> {
+    for (;;) {
+      if (aborted) return;              // stop starting new work once one has failed
+      const index = cursor++;
+      if (index >= items.length) return;
+      try {
+        results[index] = await worker(items[index], index);
+      } catch (error) {
+        aborted = true;
+        // Workers can fail concurrently — keep the lowest index, not the first
+        // rejection to land.
+        if (failure === undefined || index < failure.index) failure = { index, error };
+        return;
+      }
+    }
   }
 
-  const { lat, lng } = json.results[0].geometry.location;
-  return { latitude: lat, longitude: lng };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => runWorker())
+  );
+
+  return { results, failure };
+}
+
+// Sheets cells are unbounded; the destination columns are `text`. Fail on the
+// offending row rather than truncating — see the MAX_*_CHARS comment above.
+function readCell(row: unknown[], col: number, rowNum: number, label: string, max: number): string {
+  const raw = row[col];
+  if (raw === undefined || raw === null) return '';
+  // Collapse embedded newlines/tabs: a multi-line address breaks geocoding and
+  // a stray newline in a name is never intentional.
+  const value = String(raw).replace(/\s+/g, ' ').trim();
+  if (value.length > max) {
+    throw new Error(
+      `Row ${rowNum}: ${label} is ${value.length} characters — the limit is ${max}. ` +
+        `Check that cell in the sheet.`
+    );
+  }
+  return value;
 }
 
 export const GoogleSheetsService = {
@@ -141,11 +261,27 @@ export const GoogleSheetsService = {
     const json = (await response.json()) as { values?: unknown[][] };
     const allRows: unknown[][] = json.values ?? [];
 
-    // Geocode with in-memory cache — avoids duplicate API calls when multiple jobs
-    // share the same address (common for multi-unit properties).
-    const coordCache = new Map<string, { latitude: number; longitude: number }>();
-    const jobs: Omit<SignJob, 'id' | 'isComplete'>[] = [];
-    let matchCount = 0;
+    // Two phases, deliberately.
+    //
+    // Phase 1 parses, validates and counts without touching the network, so the
+    // row cap and every malformed-cell error are raised before a single
+    // billable geocode request goes out. The previous single-pass loop
+    // geocoded rows 1..500 and only then discovered row 501 blew the cap.
+    //
+    // Phase 2 geocodes the DISTINCT addresses concurrently. Sequential awaits
+    // inside the loop meant one round trip per unique address end to end —
+    // ~40 addresses at 150-300ms each is 6-12 seconds of spinner for work that
+    // is entirely independent.
+    type Candidate = {
+      rowNum: number;
+      address: string;
+      clientName: string;
+      agentText: string;
+      notes: string;
+      signDescription: string;
+    };
+
+    const candidates: Candidate[] = [];
 
     for (let i = 0; i < allRows.length; i++) {
       const row = allRows[i];
@@ -156,48 +292,26 @@ export const GoogleSheetsService = {
       if (!rawAddress || !String(rawAddress).trim()) continue;
       if (!serialMatchesDate(row[COL.date], importDate)) continue;
 
-      matchCount++;
-      if (matchCount > MAX_IMPORT_ROWS) {
+      if (candidates.length + 1 > MAX_IMPORT_ROWS) {
         throw new Error(
           `More than ${MAX_IMPORT_ROWS} jobs found for this date — split them across separate route codes first.`
         );
       }
 
-      const address = String(rawAddress).trim();
-      const notes = row[COL.notes] ? String(row[COL.notes]).trim() : '';
-      const size = row[COL.size] ? String(row[COL.size]).trim() : '';
-      const agentText = row[COL.agentName] ? String(row[COL.agentName]).trim() : '';
+      const address = readCell(row, COL.address, rowNum, 'the address', MAX_ADDRESS_CHARS);
+      const notes = readCell(row, COL.notes, rowNum, 'the notes cell', MAX_NOTES_CHARS);
+      const size = readCell(row, COL.size, rowNum, 'the size cell', MAX_SIZE_CHARS);
+      const agentText = readCell(row, COL.agentName, rowNum, 'the agent name', MAX_NAME_CHARS);
+      const clientName = readCell(row, COL.clientName, rowNum, 'the agency name', MAX_NAME_CHARS);
 
       // Row reference appended so admin can trace back to the source sheet for contact details
       const noteParts = [notes, size && `(${size})`].filter(Boolean).join(' ');
       const signDescription = noteParts ? `${noteParts} — Row ${rowNum}` : `Row ${rowNum}`;
 
-      let coords = coordCache.get(address);
-      if (!coords) {
-        try {
-          coords = await geocodeAddress(address, mapsApiKey);
-          coordCache.set(address, coords);
-        } catch (err: unknown) {
-          throw new Error(
-            `Row ${rowNum}: ${err instanceof Error ? err.message : 'Geocoding failed.'}`
-          );
-        }
-      }
-
-      jobs.push({
-        clientName: row[COL.clientName] ? String(row[COL.clientName]).trim() : '',
-        agentName: agentText,
-        agentEmail: '',  // not in sheet — admin adds via route detail screen before sending emails
-        address,
-        signDescription,
-        jobType: detectJobType(agentText, notes),
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        sortOrder: jobs.length + 1,
-      });
+      candidates.push({ rowNum, address, clientName, agentText, notes, signDescription });
     }
 
-    if (matchCount === 0) {
+    if (candidates.length === 0) {
       const dateLabel = `${importDate.getDate()}/${importDate.getMonth() + 1}/${importDate.getFullYear()}`;
       throw new Error(
         `No jobs found for ${dateLabel} in "${sheetName}". ` +
@@ -205,7 +319,49 @@ export const GoogleSheetsService = {
       );
     }
 
-    return jobs;
+    // Distinct addresses only — multi-unit properties repeat an address across
+    // rows, and geocoding it once is both faster and cheaper. This replaces the
+    // old in-loop coordCache and preserves its behaviour.
+    const uniqueAddresses = [...new Set(candidates.map((c) => c.address))];
+
+    // Lowest row number per address, so a geocode failure reports the first row
+    // the admin will find when they go looking in the sheet.
+    const firstRowForAddress = new Map<string, number>();
+    for (const c of candidates) {
+      const seen = firstRowForAddress.get(c.address);
+      if (seen === undefined || c.rowNum < seen) firstRowForAddress.set(c.address, c.rowNum);
+    }
+
+    const { results, failure } = await mapWithConcurrency(
+      uniqueAddresses,
+      GEOCODE_CONCURRENCY,
+      (address) => geocodeAddress(address, mapsApiKey)
+    );
+
+    if (failure) {
+      const address = uniqueAddresses[failure.index];
+      const rowNum = firstRowForAddress.get(address) ?? 0;
+      throw new Error(
+        `Row ${rowNum}: ${failure.error instanceof Error ? failure.error.message : 'Geocoding failed.'}`
+      );
+    }
+
+    const coordCache = new Map(uniqueAddresses.map((address, i) => [address, results[i]]));
+
+    return candidates.map((c, i) => {
+      const coords = coordCache.get(c.address)!;
+      return {
+        clientName: c.clientName,
+        agentName: c.agentText,
+        agentEmail: '',  // not in sheet — see the agent-email gap noted in the handover
+        address: c.address,
+        signDescription: c.signDescription,
+        jobType: detectJobType(c.agentText, c.notes),
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        sortOrder: i + 1,
+      };
+    });
   },
 
   // Save parsed jobs to Supabase, linked to a route code.

@@ -271,3 +271,235 @@ describe('saveJobsToRoute — replace-incomplete semantics', () => {
     ).rejects.toThrow(/Could not clear existing jobs: permission denied/);
   });
 });
+
+// ── importJobs — geocoding concurrency, retry, and input caps (2026-08-21) ───
+//
+// The Geocoding API's documented default quota is 25 QPS per project with a
+// 3,000/minute ceiling (verified against the usage-and-billing reference
+// 2026-08-21), which is why concurrency is bounded and OVER_QUERY_LIMIT is
+// retried rather than fatal.
+
+describe('importJobs — geocoding concurrency', () => {
+  // Resolve geocode calls only when released, so we can observe how many the
+  // service holds in flight at once.
+  function installGatedGeocode(rows: Row[]) {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const release: Array<() => void> = [];
+
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      if (String(url).includes('sheets.googleapis.com')) {
+        return Promise.resolve(sheetsResponse(rows));
+      }
+      if (String(url).includes('maps/api/geocode')) {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return new Promise((resolve) => {
+          release.push(() => {
+            inFlight--;
+            resolve(geocodeOk());
+          });
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    return {
+      get maxInFlight() { return maxInFlight; },
+      get pending() { return release.length; },
+      releaseAll() { while (release.length) release.shift()!(); },
+      async drain() {
+        // Release in waves until the import settles.
+        for (let i = 0; i < 50 && release.length; i++) {
+          this.releaseAll();
+          await new Promise((r) => setImmediate(r));
+        }
+      },
+    };
+  }
+
+  it('geocodes distinct addresses in parallel rather than one at a time', async () => {
+    const rows: Row[] = Array.from(
+      { length: 12 },
+      (_, i) => [SERIAL_TODAY, 'C', 'A', 'n', '', '', `${i + 1} Unique St`] as Row
+    );
+    const gate = installGatedGeocode(rows);
+
+    const promise = GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+    // Let the pool saturate before releasing anything.
+    await new Promise((r) => setImmediate(r));
+
+    expect(gate.maxInFlight).toBeGreaterThan(1);   // the old code was strictly 1
+    expect(gate.maxInFlight).toBeLessThanOrEqual(5); // and stays under the documented QPS budget
+
+    await gate.drain();
+    const jobs = await promise;
+    expect(jobs).toHaveLength(12);
+  });
+
+  it('still geocodes each distinct address exactly once when rows repeat', async () => {
+    installFetch([
+      [SERIAL_TODAY, 'C', 'A', 'n', '', '', '5 Same St'],
+      [SERIAL_TODAY, 'C', 'A', 'n', '', '', '7 Other St'],
+      [SERIAL_TODAY, 'C', 'A', 'n', '', '', '5 Same St'],
+    ]);
+
+    const jobs = await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+    const geocodeCalls = (global.fetch as jest.Mock).mock.calls.filter(([u]) =>
+      String(u).includes('maps/api/geocode')
+    );
+
+    expect(geocodeCalls).toHaveLength(2);
+    expect(jobs).toHaveLength(3);
+    // sortOrder follows sheet order, not geocode completion order.
+    expect(jobs.map((j) => j.sortOrder)).toEqual([1, 2, 3]);
+    expect(jobs.map((j) => j.address)).toEqual(['5 Same St', '7 Other St', '5 Same St']);
+  });
+
+  // Concurrency must not make the reported row number depend on network timing.
+  it('reports the lowest failing row number regardless of which request fails first', async () => {
+    const rows: Row[] = [
+      [SERIAL_TODAY, 'C', 'A', 'n', '', '', 'Good St'],
+      [SERIAL_TODAY, 'C', 'A', 'n', '', '', 'Bad Early St'],   // row 3
+      [SERIAL_TODAY, 'C', 'A', 'n', '', '', 'Bad Late St'],    // row 4
+    ];
+
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes('sheets.googleapis.com')) return Promise.resolve(sheetsResponse(rows));
+      if (u.includes('maps/api/geocode')) {
+        const zeroResults = { ok: true, status: 200, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) };
+        // The LATER row fails immediately; the earlier one fails after a delay.
+        if (u.includes('Bad%20Late%20St')) return Promise.resolve(zeroResults);
+        if (u.includes('Bad%20Early%20St')) {
+          return new Promise((resolve) => setTimeout(() => resolve(zeroResults), 30));
+        }
+        return Promise.resolve(geocodeOk());
+      }
+      throw new Error('unexpected');
+    });
+
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE))
+      .rejects.toThrow(/Row 3: Could not geocode "Bad Early St"/);
+  });
+
+  it('enforces the row cap before spending any geocoding quota', async () => {
+    const rows: Row[] = Array.from(
+      { length: 501 },
+      (_, i) => [SERIAL_TODAY, 'C', 'A', 'n', '', '', `${i} Distinct St`] as Row
+    );
+    installFetch(rows);
+
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE))
+      .rejects.toThrow(/More than 500 jobs/);
+
+    // The old single-pass loop geocoded 500 addresses before discovering row 501.
+    const geocodeCalls = (global.fetch as jest.Mock).mock.calls.filter(([u]) =>
+      String(u).includes('maps/api/geocode')
+    );
+    expect(geocodeCalls).toHaveLength(0);
+  });
+});
+
+describe('importJobs — geocoding retry', () => {
+  it('retries OVER_QUERY_LIMIT and succeeds, instead of failing the whole import', async () => {
+    let geocodeAttempts = 0;
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes('sheets.googleapis.com')) {
+        return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]));
+      }
+      if (u.includes('maps/api/geocode')) {
+        geocodeAttempts++;
+        if (geocodeAttempts === 1) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'OVER_QUERY_LIMIT', results: [] }) });
+        }
+        return Promise.resolve(geocodeOk());
+      }
+      throw new Error('unexpected');
+    });
+
+    const jobs = await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+    expect(geocodeAttempts).toBe(2);
+    expect(jobs).toHaveLength(1);
+  });
+
+  it('retries a 429 from the geocoder', async () => {
+    let attempts = 0;
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes('sheets.googleapis.com')) {
+        return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]));
+      }
+      if (u.includes('maps/api/geocode')) {
+        attempts++;
+        if (attempts === 1) return Promise.resolve({ ok: false, status: 429, json: async () => ({}) });
+        return Promise.resolve(geocodeOk());
+      }
+      throw new Error('unexpected');
+    });
+
+    await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+    expect(attempts).toBe(2);
+  });
+
+  it('does not retry a permanent status such as ZERO_RESULTS', async () => {
+    let attempts = 0;
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes('sheets.googleapis.com')) {
+        return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', 'Nowhere']]));
+      }
+      if (u.includes('maps/api/geocode')) {
+        attempts++;
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) });
+      }
+      throw new Error('unexpected');
+    });
+
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE)).rejects.toThrow(/ZERO_RESULTS/);
+    expect(attempts).toBe(1);  // retrying a permanent failure just burns quota
+  });
+});
+
+describe('importJobs — input caps on sheet-derived strings', () => {
+  it.each([
+    ['address', 6, 301, /the address is 301 characters — the limit is 300/],
+    ['agency name', 1, 201, /the agency name is 201 characters — the limit is 200/],
+    ['agent name', 2, 201, /the agent name is 201 characters — the limit is 200/],
+    ['notes cell', 3, 501, /the notes cell is 501 characters — the limit is 500/],
+    ['size cell', 4, 101, /the size cell is 101 characters — the limit is 100/],
+  ] as const)('rejects an over-long %s on the offending row', async (_label, col, length, message) => {
+    const row: Row = [SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St'];
+    (row as unknown as unknown[])[col] = 'x'.repeat(length);
+    installFetch([row]);
+
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE))
+      .rejects.toThrow(message);
+  });
+
+  it('names the row so the admin can find the offending cell', async () => {
+    const good: Row = [SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St'];
+    const bad: Row = [SERIAL_TODAY, 'C', 'A', 'n', '', '', 'x'.repeat(400)];
+    installFetch([good, good, bad]);
+
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE))
+      .rejects.toThrow(/^Row 4: /);
+  });
+
+  it('accepts values exactly at the cap', async () => {
+    const row: Row = [SERIAL_TODAY, 'C', 'A', 'n', '', '', 'x'.repeat(300)];
+    installFetch([row]);
+
+    const jobs = await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+    expect(jobs[0].address).toHaveLength(300);
+  });
+
+  it('collapses embedded newlines and tabs — a multi-line address breaks geocoding', async () => {
+    installFetch([[SERIAL_TODAY, 'Harcourts\nPerth', 'A', 'n', '', '', '12 Maple St\n\tPerth  WA']]);
+
+    const jobs = await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+    expect(jobs[0].address).toBe('12 Maple St Perth WA');
+    expect(jobs[0].clientName).toBe('Harcourts Perth');
+  });
+});
