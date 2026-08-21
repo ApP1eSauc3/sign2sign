@@ -28,6 +28,18 @@ function sanitizeExtension(imageUri: string): { ext: string; contentType: string
   return { ext, contentType };
 }
 
+// record_job_photo() returns machine-readable error codes (migration 013).
+// Translate at the boundary — a driver in a paddock cannot act on
+// "invalid_route_code", and the raw string must never reach the UI.
+const RECORD_PHOTO_ERRORS: Record<string, string> = {
+  invalid_route_code:
+    'Your route code is no longer valid. Tell dispatch which jobs you finished so they can record them.',
+  job_not_found: 'That job is not on your route any more. Check with dispatch.',
+  invalid_photo_key: 'Something went wrong saving that photo. Take it again.',
+  invalid_location:
+    'Your location could not be recorded accurately. Check that Location Services is on, then retry.',
+};
+
 export type PhotoLocation = {
   latitude: number;
   longitude: number;
@@ -93,10 +105,20 @@ export const JobPhotoService = {
     return processed.uri;
   },
 
-  // Upload photo to Supabase Storage and update the job record.
+  // Upload photo to Supabase Storage, then record it against the job via the
+  // record_job_photo() RPC (migration 013).
+  //
   // GPS location is passed in by the store at call time — not read here.
-  // routeCode is required for the P0002 recovery RPC which validates the
-  // calling code owns the target job (anon no longer has direct SELECT on jobs).
+  // routeCode authorizes the write: the RPC checks the code is active (within
+  // the 24h offline-sync grace window) and that it owns the target job.
+  //
+  // Why an RPC and not a direct UPDATE: migration 006 revoked anon's SELECT on
+  // `jobs` without re-granting a column subset, and PostgREST's
+  // `.update(...).eq('id', jobId)` needs SELECT on `jobs.id` to evaluate its
+  // WHERE clause. The statement was refused at the privilege layer before RLS
+  // was consulted, which is why driver photo upload was dead in production.
+  // 013 moves the write behind a SECURITY DEFINER function and removes anon's
+  // direct write access to the table entirely. See the migration header.
   async uploadPhoto(
     jobId: string,
     imageUri: string,
@@ -117,54 +139,51 @@ export const JobPhotoService = {
 
     if (uploadError) throw new Error(uploadError.message);
 
-    // Update the job record — key only, never the signed URL
-    const { error: updateError } = await supabase
-      .from('jobs')
-      .update({
-        photo_key: key,
-        photo_gps_lat: currentLocation.latitude,
-        photo_gps_lng: currentLocation.longitude,
-        photo_timestamp: timestamp.toISOString(),
-      })
-      .eq('id', jobId);
+    // Record the key against the job — key only, never the signed URL.
+    const { data, error } = await supabase.rpc('record_job_photo', {
+      p_job_id: jobId,
+      p_route_code: routeCode,
+      p_photo_key: key,
+      p_lat: currentLocation.latitude,
+      p_lng: currentLocation.longitude,
+      p_timestamp: timestamp.toISOString(),
+    });
 
-    if (updateError) {
-      // P0002 = photo_key write-once trigger: an earlier upload attempt reached the
-      // DB but the client never received the response (network failure mid-request).
-      // The photo is already on record — fetch the canonical key and return success
-      // rather than surfacing a spurious error to the driver.
-      if (updateError.code === 'P0002') {
-        // Anon has no direct SELECT on jobs — go through the recovery RPC
-        // which validates that this route code owns the target job.
-        const { data: recovered } = await supabase.rpc('recover_existing_photo', {
-          p_job_id: jobId,
-          p_route_code: routeCode,
-        });
-        if (recovered && typeof recovered === 'object') {
-          const r = recovered as {
-            photo_key?: string;
-            photo_gps_lat?: number | null;
-            photo_gps_lng?: number | null;
-            photo_timestamp?: string | null;
-          };
-          if (typeof r.photo_key === 'string') {
-            return {
-              photoKey: r.photo_key,
-              latitude: r.photo_gps_lat ?? currentLocation.latitude,
-              longitude: r.photo_gps_lng ?? currentLocation.longitude,
-              timestamp: r.photo_timestamp ? new Date(r.photo_timestamp) : timestamp,
-            };
-          }
-        }
-      }
-      throw new Error(updateError.message);
+    if (error) throw new Error(error.message);
+
+    // Narrow the RPC payload at the boundary — `data` is typed as unknown.
+    if (data === null || typeof data !== 'object') {
+      throw new Error('Unexpected response while recording the photo.');
+    }
+
+    const result = data as {
+      ok?: boolean;
+      error?: string;
+      already_recorded?: boolean;
+      photo_key?: string;
+      photo_gps_lat?: number | null;
+      photo_gps_lng?: number | null;
+      photo_timestamp?: string | null;
+    };
+
+    if (typeof result.error === 'string' && result.error.length > 0) {
+      throw new Error(RECORD_PHOTO_ERRORS[result.error] ?? result.error);
+    }
+
+    // already_recorded means an earlier attempt reached the database but the
+    // client never saw the response (network failure mid-request). The photo is
+    // on record and photo_key is write-once, so the stored values — not the ones
+    // we just generated — are the truth. This replaces the old two-round-trip
+    // P0002 + recover_existing_photo() dance; the RPC returns them inline.
+    if (typeof result.photo_key !== 'string') {
+      throw new Error('Unexpected response while recording the photo.');
     }
 
     return {
-      photoKey: key,
-      latitude: currentLocation.latitude,
-      longitude: currentLocation.longitude,
-      timestamp,
+      photoKey: result.photo_key,
+      latitude: result.photo_gps_lat ?? currentLocation.latitude,
+      longitude: result.photo_gps_lng ?? currentLocation.longitude,
+      timestamp: result.photo_timestamp ? new Date(result.photo_timestamp) : timestamp,
     };
   },
 
