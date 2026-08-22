@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -15,10 +15,24 @@ import { useDriverSession } from '../../stores/useDriverSession';
 import { useAppStore } from '../../stores/useAppStore';
 import { AppMode, SignJob, JobUploadState } from '../../data/SignJob';
 import { colors } from '../../utils/colors';
-import { RouteService, LatLng } from '../../services/RouteService';
+import { RouteService, LatLng, RouteResult } from '../../services/RouteService';
 import { OfflineBanner } from '../OfflineBanner';
+import { orderJobsForDisplay } from './mapOrder.logic';
 
 type Props = NativeStackScreenProps<DriverStackParamList, 'DriverMap'>;
+
+// Stable identity for the no-session case. `session?.jobs ?? []` would allocate
+// a fresh array on every render and invalidate the memo below every time.
+const NO_JOBS: SignJob[] = [];
+
+// What the driver is told when the route came back as the straight-line
+// fallback. RouteService reports WHY; the wording differs because the fix does.
+const DEGRADED_MESSAGE: Record<NonNullable<RouteResult['degradedReason']>, string> = {
+  'too-many-waypoints': 'Too many stops to optimise — pins follow your list order.',
+  'no-api-key': 'Route optimisation is off — pins follow your list order.',
+  'request-failed': "Couldn't optimise the route — pins follow your list order.",
+  'bad-response': "Couldn't optimise the route — pins follow your list order.",
+};
 
 export default function DriverMapScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -35,8 +49,10 @@ export default function DriverMapScreen({ navigation }: Props) {
   const [polylineCoords, setPolylineCoords] = useState<LatLng[]>([]);
   const [orderedJobIds, setOrderedJobIds] = useState<string[]>([]);
   const [routeLoading, setRouteLoading] = useState(true);
+  const [degradedReason, setDegradedReason] =
+    useState<RouteResult['degradedReason'] | null>(null);
 
-  const jobs = session?.jobs ?? [];
+  const jobs = session?.jobs ?? NO_JOBS;
   const done = completedCount();
   const total = jobs.length;
   const allComplete = total > 0 && done === total;
@@ -46,11 +62,16 @@ export default function DriverMapScreen({ navigation }: Props) {
       setRouteLoading(false);
       return;
     }
+    let cancelled = false;
     RouteService.computeRoute(jobs).then((result) => {
+      if (cancelled) return;   // screen left before Directions answered
       setOrderedJobIds(result.orderedJobs.map(j => j.id));
       setPolylineCoords(result.polylineCoords);
+      // A straight-line fallback must not be presented as a real driving route.
+      setDegradedReason(result.degraded ? result.degradedReason ?? 'request-failed' : null);
       setRouteLoading(false);
     });
+    return () => { cancelled = true; };
   }, []); // runs once — jobs are fully loaded when this screen mounts
 
   function fitToJobs() {
@@ -82,13 +103,22 @@ export default function DriverMapScreen({ navigation }: Props) {
     setMode(AppMode.Undecided);
   }
 
-  if (!session) return null;
+  // Always look up jobs from the live store so pin state stays fresh after
+  // completions. orderedJobIds gives the optimized sequence; each id maps to the
+  // current job object.
+  //
+  // This was `orderedJobIds.map(id => jobs.find(...))` — a linear scan inside a
+  // map, so O(n²), recomputed on every render. Building the index once makes it
+  // O(n), and the memo stops it running at all unless the route order or the
+  // jobs themselves changed. `jobs` is a stable reference straight off the store
+  // (see NO_JOBS), so this does not re-run on unrelated state changes.
+  const displayJobs = useMemo(
+    () => orderJobsForDisplay(jobs, orderedJobIds),
+    [orderedJobIds, jobs]
+  );
 
-  // Always look up jobs from the live store so pin state stays fresh after completions.
-  // orderedJobIds gives the optimized sequence; each id maps to the current job object.
-  const displayJobs = orderedJobIds.length > 0
-    ? orderedJobIds.map(id => jobs.find(j => j.id === id)).filter((j): j is SignJob => j !== undefined)
-    : [...jobs].sort((a, b) => a.sortOrder - b.sortOrder);
+  // Every hook must run before this, on every render — including the ones above.
+  if (!session) return null;
 
   return (
     <View style={styles.root}>
@@ -115,8 +145,22 @@ export default function DriverMapScreen({ navigation }: Props) {
           const uploadState = uploadStates[job.id];
           return (
             <Marker
-              // Key includes upload status so the pin re-renders when the job completes
-              key={`${job.id}-${job.isComplete}-${uploadState?.status ?? 'idle'}`}
+              // The key deliberately carries `isComplete` and nothing else.
+              //
+              // Changing a key does not re-render a component, it destroys and
+              // recreates it — on react-native-maps that is a native view
+              // teardown, which is why it is scoped as tightly as possible. It
+              // is needed at all because `tracksViewChanges={false}` tells the
+              // native marker to snapshot its custom view once and stop
+              // observing, so a normal prop update would not repaint the pin.
+              //
+              // `uploadState.status` used to be in here too, which meant every
+              // capture → preview → uploading → succeeded transition tore down
+              // and rebuilt a native marker. JobPin does not render uploadState
+              // at all — only `isComplete` and `jobType` — so those remounts
+              // repainted nothing. The callout DOES show upload status, but it
+              // is a separate view rendered on tap and updates normally.
+              key={`${job.id}-${job.isComplete}`}
               coordinate={{ latitude: job.latitude, longitude: job.longitude }}
               tracksViewChanges={false}
               onCalloutPress={() => navigation.navigate('DriverJob', { jobId: job.id })}
@@ -163,6 +207,25 @@ export default function DriverMapScreen({ navigation }: Props) {
 
         {/* Offline banner sits below the controls row inside the overlay */}
         <OfflineBanner />
+
+        {/*
+          Route-degraded notice. The pins are numbered, so without this a driver
+          reads the sequence as an optimised run and trusts it. Amber
+          (statusProgress) is the advisory token already used by OfflineBanner —
+          this is information, not a failure, and nothing is broken.
+
+          The ⚠ carries the meaning alongside the colour rather than relying on
+          hue alone, and the strip is non-interactive, so no touch target
+          applies. Wording names the consequence ("pins follow your list order")
+          rather than the cause — a driver cannot act on "waypoint cap".
+        */}
+        {!routeLoading && degradedReason && (
+          <View style={styles.degradedBanner} pointerEvents="none" accessible>
+            <Text style={styles.degradedText}>
+              {`⚠  ${DEGRADED_MESSAGE[degradedReason]}`}
+            </Text>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -170,7 +233,11 @@ export default function DriverMapScreen({ navigation }: Props) {
 
 // ─── Job pin marker ───────────────────────────────────────────────────────────
 
-function JobPin({ job, routeIndex }: { job: SignJob; routeIndex: number }) {
+// Memoised: a route of n jobs renders n pins, and without this every one of
+// them re-renders whenever any single job's state changes. Props are a job
+// object (stable reference from the store) and a number, so the default
+// shallow compare is exactly right.
+const JobPin = memo(function JobPin({ job, routeIndex }: { job: SignJob; routeIndex: number }) {
   const pinColor = job.isComplete
     ? colors.textDisabled
     : job.jobType === 'install'
@@ -194,11 +261,11 @@ function JobPin({ job, routeIndex }: { job: SignJob; routeIndex: number }) {
       <View style={[styles.pinPointer, { borderTopColor: pinColor }]} />
     </View>
   );
-}
+});
 
 // ─── Callout card ─────────────────────────────────────────────────────────────
 
-function JobCallout({
+const JobCallout = memo(function JobCallout({
   job,
   uploadState,
 }: {
@@ -248,11 +315,29 @@ function JobCallout({
       <Text style={styles.calloutCta}>Open job →</Text>
     </View>
   );
-}
+});
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  // Route-degraded advisory. Same strip language as OfflineBanner so the two
+  // read as one family when both are showing. Amber on dark amber:
+  // statusProgress is documented as the max-peripheral-visibility, CVD-safe
+  // token — the right choice for something glanced at in sunlight.
+  degradedBanner: {
+    backgroundColor: colors.statusProgressBg,
+    paddingHorizontal: 16,   // DESIGN §2.4 — standard page margin
+    paddingVertical: 12,     // spacing grid
+    borderTopWidth: 1,
+    borderTopColor: colors.statusProgress,
+  },
+  degradedText: {
+    color: colors.statusProgress,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
   root: { flex: 1, backgroundColor: colors.bg },
 
   // Top floating bar
