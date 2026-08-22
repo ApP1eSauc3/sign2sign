@@ -145,22 +145,33 @@ export default function DriverMapScreen({ navigation }: Props) {
           const uploadState = uploadStates[job.id];
           return (
             <Marker
-              // The key deliberately carries `isComplete` and nothing else.
+              // The key carries exactly what JobPin PAINTS: the completion
+              // tick, and the route number.
               //
               // Changing a key does not re-render a component, it destroys and
-              // recreates it — on react-native-maps that is a native view
-              // teardown, which is why it is scoped as tightly as possible. It
-              // is needed at all because `tracksViewChanges={false}` tells the
-              // native marker to snapshot its custom view once and stop
-              // observing, so a normal prop update would not repaint the pin.
+              // recreates it — on react-native-maps a native view teardown —
+              // so it is scoped as tightly as possible. It is needed at all
+              // because `tracksViewChanges={false}` tells the native marker to
+              // snapshot its custom view once and stop observing, so an
+              // ordinary prop change repaints nothing.
               //
-              // `uploadState.status` used to be in here too, which meant every
-              // capture → preview → uploading → succeeded transition tore down
-              // and rebuilt a native marker. JobPin does not render uploadState
-              // at all — only `isComplete` and `jobType` — so those remounts
-              // repainted nothing. The callout DOES show upload status, but it
-              // is a separate view rendered on tap and updates normally.
-              key={`${job.id}-${job.isComplete}`}
+              // `routeIndex` MUST be in here. The screen mounts and paints the
+              // pins in sort_order while computeRoute is still in flight; when
+              // Directions answers a second later, displayJobs reorders and
+              // every pin's number changes. Without the index in the key those
+              // numbers are frozen at the pre-optimisation order — the polyline
+              // would show the optimised route while the pins counted in sheet
+              // order, and each would only correct itself when that job
+              // completed. Including it costs exactly one remount per marker,
+              // when the optimised order arrives, which is the repaint we want.
+              //
+              // `uploadState.status` is deliberately NOT here. It used to be,
+              // so every capture → preview → uploading → succeeded transition
+              // tore down and rebuilt a native marker — and JobPin never
+              // renders upload state, so those remounts repainted nothing. The
+              // callout does show it, but it is a separate view rendered on tap
+              // and updates normally.
+              key={`${job.id}-${job.isComplete}-${index + 1}`}
               coordinate={{ latitude: job.latitude, longitude: job.longitude }}
               tracksViewChanges={false}
               onCalloutPress={() => navigation.navigate('DriverJob', { jobId: job.id })}
