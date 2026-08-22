@@ -11,11 +11,20 @@ import AdminStack from './AdminStack';
 import DriverStack from './DriverStack';
 
 export default function AppNavigator() {
-  const { mode, setMode } = useAppStore();
+  // Atomic selector: this component re-renders only when `mode` changes, which
+  // is the only store value it renders. `useAppStore()` with no selector
+  // subscribes to the whole store and re-renders the entire navigator — and
+  // with it every mounted screen — on any state change.
+  const mode = useAppStore((s) => s.mode);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
 
   // On mount: check for a persisted admin session and route directly to dashboard
   useEffect(() => {
+    // Read actions off the store rather than closing over them. This effect runs
+    // once (deps: []), so anything captured from the render scope is frozen at
+    // its first value for the lifetime of the listener below.
+    const { setMode } = useAppStore.getState();
+
     AuthService.getSession().then((session) => {
       if (session) setMode(AppMode.AdminAuthenticated);
       setIsRestoringSession(false);
@@ -23,7 +32,14 @@ export default function AppNavigator() {
 
     // Also listen for auth state changes (token expiry, sign-out from another tab)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session && mode === AppMode.AdminAuthenticated) {
+      // getState() at call time, NOT the `mode` from the render scope.
+      //
+      // This was a live bug: the effect has an empty dep array, so the closure
+      // captured `mode` as AppMode.Undecided — its value on first render — and
+      // never saw an update. The condition below could therefore never be true,
+      // and an expired token or a sign-out elsewhere left the admin sitting on
+      // the dashboard with a dead session until they restarted the app.
+      if (!session && useAppStore.getState().mode === AppMode.AdminAuthenticated) {
         setMode(AppMode.Undecided);
       }
     });

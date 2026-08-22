@@ -22,7 +22,16 @@ type Props = NativeStackScreenProps<DriverStackParamList, 'DriverCode'>;
 export default function DriverCodeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const setMode = useAppStore((s) => s.setMode);
-  const { loadSession, isLoadingSession, codeError, flushOfflineQueue } = useDriverSession();
+  // Atomic selectors, one per value. Zustand compares each with Object.is and
+  // re-renders only when that slice changes; actions are defined once inside
+  // create() so their references are stable and never trigger a render.
+  //
+  // `useDriverSession()` with no selector subscribes to the entire store, so
+  // every setUploadState for any job on the route re-rendered this screen.
+  const loadSession = useDriverSession((s) => s.loadSession);
+  const isLoadingSession = useDriverSession((s) => s.isLoadingSession);
+  const codeError = useDriverSession((s) => s.codeError);
+  const flushOfflineQueue = useDriverSession((s) => s.flushOfflineQueue);
 
   const [code, setCode] = useState('');
 

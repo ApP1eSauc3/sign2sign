@@ -24,7 +24,12 @@ export default function DriverMapScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
 
-  const { session, uploadStates, completedCount, clearSession } = useDriverSession();
+  // Atomic selectors — see the note in src/stores/CLAUDE.md. Subscribing to the
+  // whole store re-rendered this screen on every per-job upload transition.
+  const session = useDriverSession((s) => s.session);
+  const uploadStates = useDriverSession((s) => s.uploadStates);
+  const completedCount = useDriverSession((s) => s.completedCount);
+  const clearSession = useDriverSession((s) => s.clearSession);
   const setMode = useAppStore((s) => s.setMode);
 
   const [polylineCoords, setPolylineCoords] = useState<LatLng[]>([]);

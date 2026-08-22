@@ -25,16 +25,38 @@ import { AdvancingActionButton } from '../components/AdvancingActionButton';
 
 type Props = NativeStackScreenProps<DriverStackParamList, 'DriverJob'>;
 
+// Module-level so the identity is stable. Allocating this inline would defeat
+// the Object.is comparison the selectors below rely on.
+const IDLE_UPLOAD_STATE: JobUploadState = { status: 'idle' };
+
 export default function DriverJobScreen({ route, navigation }: Props) {
   const { jobId } = route.params;
   const insets = useSafeAreaInsets();
 
-  const { getJob, uploadStates, markCompleteErrors, canMarkComplete, capturePhoto, confirmAndUpload, retakePhoto, markComplete, handleLocationDenied } =
-    useDriverSession();
+  // Subscribe to THIS job's slice only. Previously this screen took the whole
+  // store, so a background offline-queue flush touching any other job on the
+  // route re-rendered the job the driver was actually looking at.
+  //
+  // Note the defaults are applied OUTSIDE the selector, deliberately. Zustand v5
+  // compares selector output with Object.is, so a selector ending in
+  // `?? { status: 'idle' }` would return a freshly-allocated object on every
+  // call, never compare equal, and re-render forever.
+  const job = useDriverSession((s) => s.getJob(jobId));
+  const rawUploadState = useDriverSession((s) => s.uploadStates[jobId]);
+  const rawMarkCompleteError = useDriverSession((s) => s.markCompleteErrors[jobId]);
 
-  const job = getJob(jobId);
-  const uploadState: JobUploadState = uploadStates[jobId] ?? { status: 'idle' };
-  const markCompleteError = markCompleteErrors[jobId] ?? '';
+  const uploadState: JobUploadState = rawUploadState ?? IDLE_UPLOAD_STATE;
+  const markCompleteError = rawMarkCompleteError ?? '';
+
+  // The photo gate. Read as a boolean from the store — the rule itself lives in
+  // useDriverSession.canMarkComplete and must never be re-derived in a screen.
+  const photoGateOpen = useDriverSession((s) => s.canMarkComplete(jobId));
+
+  const capturePhoto = useDriverSession((s) => s.capturePhoto);
+  const confirmAndUpload = useDriverSession((s) => s.confirmAndUpload);
+  const retakePhoto = useDriverSession((s) => s.retakePhoto);
+  const markComplete = useDriverSession((s) => s.markComplete);
+  const handleLocationDenied = useDriverSession((s) => s.handleLocationDenied);
 
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
@@ -101,7 +123,7 @@ export default function DriverJobScreen({ route, navigation }: Props) {
     }
 
     // Step 3: Mark complete — only reachable when canMarkComplete is true
-    if (uploadState.status === 'succeeded' && canMarkComplete(jobId)) {
+    if (uploadState.status === 'succeeded' && photoGateOpen) {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);  // DESIGN §4 — mark complete
       setIsMarkingComplete(true);
       const success = await markComplete(jobId);
