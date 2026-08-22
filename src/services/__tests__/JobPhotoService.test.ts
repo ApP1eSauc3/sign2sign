@@ -279,13 +279,29 @@ describe('markJobComplete', () => {
     await expect(JobPhotoService.markJobComplete('job-1', '123456')).resolves.toBeUndefined();
   });
 
-  it.each(['invalid_route_code', 'job_not_found', 'photo_required'])(
-    'throws the %s error returned in the RPC payload',
-    async (code) => {
-      mockRpc.mockResolvedValue({ data: { error: code }, error: null });
-      await expect(JobPhotoService.markJobComplete('job-1', '123456')).rejects.toThrow(code);
-    }
-  );
+  // The code is carried on the error so the store can branch on it, while the
+  // message stays readable. Neither half is optional: translating alone would
+  // throw the code away, and throwing the raw code alone forces string-matching.
+  it.each([
+    ['invalid_route_code', /route code is no longer valid/i],
+    ['job_not_found', /not on your route any more/i],
+    ['photo_required', /Take the job photo before/i],
+  ])('carries the %s code and a readable message', async (code, message) => {
+    mockRpc.mockResolvedValue({ data: { error: code }, error: null });
+
+    await expect(JobPhotoService.markJobComplete('job-1', '123456')).rejects.toMatchObject({
+      code,
+      message: expect.stringMatching(message),
+    });
+  });
+
+  it('passes an unrecognised code straight through as both code and message', async () => {
+    mockRpc.mockResolvedValue({ data: { error: 'something_new' }, error: null });
+    await expect(JobPhotoService.markJobComplete('job-1', '123456')).rejects.toMatchObject({
+      code: 'something_new',
+      message: 'something_new',
+    });
+  });
 
   it('throws on a transport-level error', async () => {
     mockRpc.mockResolvedValue({ data: null, error: { message: 'timeout' } });

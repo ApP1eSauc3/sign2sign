@@ -503,3 +503,28 @@ describe('importJobs — input caps on sheet-derived strings', () => {
     expect(jobs[0].clientName).toBe('Harcourts Perth');
   });
 });
+
+describe('importJobs — readCell behaviour change (2026-08-21)', () => {
+  // Pinned deliberately. The old inline reads used `row[col] ? ... : ''`, so a
+  // cell holding the NUMBER 0 was falsy and silently became ''. Dropping a
+  // cell's contents because it happens to be zero is data loss, so 0 now reads
+  // as '0'. If this test fails, that decision is being reversed — do it
+  // knowingly.
+  it('reads a numeric zero cell as "0" rather than dropping it', async () => {
+    installFetch([[SERIAL_TODAY, 0 as unknown as string, 'A', 0 as unknown as string, '', '', '1 St']]);
+
+    const jobs = await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+
+    expect(jobs[0].clientName).toBe('0');
+    expect(jobs[0].signDescription).toBe('0 — Row 2');
+  });
+
+  it('still reads a genuinely empty cell as an empty string', async () => {
+    installFetch([[SERIAL_TODAY, '', 'A', '', '', '', '1 St']]);
+
+    const jobs = await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+
+    expect(jobs[0].clientName).toBe('');
+    expect(jobs[0].signDescription).toBe('Row 2');
+  });
+});

@@ -442,7 +442,7 @@ All user-facing error strings are listed here. Find their source in the referenc
 | Code | Meaning | Handling |
 |---|---|---|
 | `23505` | Unique constraint violation on `code` column during insert | `RouteCodeService.generateDailyCodes` retries with a new 6-digit value (up to 5 attempts) |
-| `P0002` | `photo_key` write-once trigger — an earlier upload reached the DB but the response was lost | `JobPhotoService.uploadPhoto` recovers the canonical photo via `recover_existing_photo()` and reports success |
+| `P0002` | `photo_key` write-once trigger — an earlier upload reached the DB but the response was lost | Since migration `013` the client never sees this. `record_job_photo()` checks for an existing `photo_key` **before** updating and returns the stored row with `already_recorded: true`, so the trigger is unreachable defence-in-depth rather than a control-flow path. The old two-round-trip recovery via `recover_existing_photo()` is gone. |
 | `P0004` | Duplicate-location trigger — address + job type already assigned to another driver today | `GoogleSheetsService.saveJobsToRoute` maps to a plain-English import error |
 | `P0005` | Per-device rate limit inside `validate_route_code()` | Reaches the client as HTTP 429 → "Too many attempts" message |
 

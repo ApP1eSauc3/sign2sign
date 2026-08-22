@@ -1,6 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from './supabaseClient';
+import { JobWriteError } from '../data/JobWriteError';
 
 // Max dimension for either axis — keeps uploads under ~500KB on most devices
 const MAX_PHOTO_DIMENSION = 1600;
@@ -28,9 +29,6 @@ function sanitizeExtension(imageUri: string): { ext: string; contentType: string
   return { ext, contentType };
 }
 
-// record_job_photo() returns machine-readable error codes (migration 013).
-// Translate at the boundary — a driver in a paddock cannot act on
-// "invalid_route_code", and the raw string must never reach the UI.
 const RECORD_PHOTO_ERRORS: Record<string, string> = {
   invalid_route_code:
     'Your route code is no longer valid. Tell dispatch which jobs you finished so they can record them.',
@@ -38,6 +36,15 @@ const RECORD_PHOTO_ERRORS: Record<string, string> = {
   invalid_photo_key: 'Something went wrong saving that photo. Take it again.',
   invalid_location:
     'Your location could not be recorded accurately. Check that Location Services is on, then retry.',
+};
+
+const COMPLETE_JOB_ERRORS: Record<string, string> = {
+  invalid_route_code:
+    'Your route code is no longer valid. Tell dispatch which jobs you finished so they can record them.',
+  job_not_found: 'That job is not on your route any more. Check with dispatch.',
+  // Should be unreachable — the store's photo gate blocks Mark Complete until
+  // the upload has succeeded. If it ever fires, the gate has a hole.
+  photo_required: 'Take the job photo before marking this job complete.',
 };
 
 export type PhotoLocation = {
@@ -167,7 +174,7 @@ export const JobPhotoService = {
     };
 
     if (typeof result.error === 'string' && result.error.length > 0) {
-      throw new Error(RECORD_PHOTO_ERRORS[result.error] ?? result.error);
+      throw new JobWriteError(result.error, RECORD_PHOTO_ERRORS[result.error] ?? result.error);
     }
 
     // already_recorded means an earlier attempt reached the database but the
@@ -210,7 +217,7 @@ export const JobPhotoService = {
     if (data !== null && typeof data === 'object') {
       const result = data as { ok?: boolean; error?: string; already_complete?: boolean };
       if (typeof result.error === 'string' && result.error.length > 0) {
-        throw new Error(result.error);
+        throw new JobWriteError(result.error, COMPLETE_JOB_ERRORS[result.error] ?? result.error);
       }
     }
   },

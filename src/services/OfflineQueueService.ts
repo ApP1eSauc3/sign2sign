@@ -160,6 +160,11 @@ export const OfflineQueueService = {
   // Concurrent callers are coalesced onto one run (see inFlightFlush) and all
   // receive the same FlushResult.
   //
+  // Caveat, stated rather than hidden: only the FIRST caller's handlers run.
+  // Every call site in this app passes the same store-bound handlers, so that
+  // is currently a distinction without a difference — but if a caller ever
+  // needs its own handlers invoked, this coalescing is the thing to revisit.
+  //
   // Handlers run OUTSIDE the queue lock. An upload is seconds of network I/O;
   // holding the lock across it would block a driver enqueueing their next
   // photo behind the previous one's upload. Only the per-op removal that

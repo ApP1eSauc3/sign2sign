@@ -191,5 +191,7 @@ export const RouteService = {
 };
 
 // Exported for tests only — the decoder is pure and worth pinning directly
-// rather than exercising it through a mocked fetch.
+// rather than exercising it through a mocked fetch. It stays in the production
+// bundle (a few hundred bytes, no behaviour, no secrets); the alternative is a
+// separate module split that costs more in indirection than it saves.
 export const __testing = { decodePolyline, isValidPermutation, MAX_INTERMEDIATE_WAYPOINTS };

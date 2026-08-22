@@ -3,6 +3,7 @@ import { RouteCodeService } from '../../services/RouteCodeService';
 import { JobPhotoService } from '../../services/JobPhotoService';
 import { OfflineQueueService } from '../../services/OfflineQueueService';
 import { SignJob } from '../../data/SignJob';
+import { JobWriteError } from '../../data/JobWriteError';
 
 jest.mock('../../services/RouteCodeService', () => ({
   RouteCodeService: { loadSession: jest.fn() },
@@ -312,7 +313,7 @@ describe('flushOfflineQueue — mark-complete failure surfacing', () => {
 
   it('surfaces an expired/invalid code as a dispatch instruction', async () => {
     flushWithMarkCompleteOp('job-1');
-    mockMarkComplete.mockRejectedValue(new Error('invalid_route_code'));
+    mockMarkComplete.mockRejectedValue(new JobWriteError('invalid_route_code', 'Your route code is no longer valid.'));
 
     await useDriverSession.getState().flushOfflineQueue();
 
@@ -323,6 +324,7 @@ describe('flushOfflineQueue — mark-complete failure surfacing', () => {
 
   it('surfaces other failures as a will-retry message', async () => {
     flushWithMarkCompleteOp('job-1');
+    // No `code` — a transport failure, not an RPC-level rejection.
     mockMarkComplete.mockRejectedValue(new Error('network down'));
 
     await useDriverSession.getState().flushOfflineQueue();

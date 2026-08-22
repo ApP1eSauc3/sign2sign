@@ -179,6 +179,12 @@ async function mapWithConcurrency<T, R>(
 
 // Sheets cells are unbounded; the destination columns are `text`. Fail on the
 // offending row rather than truncating — see the MAX_*_CHARS comment above.
+//
+// Behaviour note (changed 2026-08-21): the previous inline reads were
+// `row[col] ? String(row[col]).trim() : ''`, so a cell holding the NUMBER 0 was
+// falsy and became ''. This reads it as '0'. That is deliberate — dropping a
+// cell's contents because it happens to be zero is data loss, not tidiness —
+// but it is a real difference and is pinned by a test.
 function readCell(row: unknown[], col: number, rowNum: number, label: string, max: number): string {
   const raw = row[col];
   if (raw === undefined || raw === null) return '';
