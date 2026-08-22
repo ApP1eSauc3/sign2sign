@@ -1,3 +1,4 @@
+import { useMemo, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -11,7 +12,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { DriverStackParamList } from '../../navigation/DriverStack';
 import { useDriverSession } from '../../stores/useDriverSession';
 import { useAppStore } from '../../stores/useAppStore';
-import { AppMode } from '../../data/SignJob';
+import { AppMode, SignJob, JobUploadState } from '../../data/SignJob';
 import { colors } from '../../utils/colors';
 import { OfflineBanner } from '../OfflineBanner';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -20,24 +21,59 @@ import { EmptyState } from '../components/EmptyState';
 
 type Props = NativeStackScreenProps<DriverStackParamList, 'DriverRoute'>;
 
+// Stable identities — recreating these per render defeats FlatList's own
+// bail-out and the row memoisation below.
+const NO_JOBS: SignJob[] = [];
+// Module-level so the identity is stable — a selector default allocated inline
+// would never compare equal under Object.is and would re-render forever.
+const IDLE_UPLOAD_STATE: JobUploadState = { status: 'idle' };
+const keyExtractor = (j: SignJob) => j.id;
+const Separator = () => <View style={styles.separator} />;
+
 export default function DriverRouteScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   // Atomic selectors — see the note in src/stores/CLAUDE.md. Subscribing to the
   // whole store re-rendered this screen on every per-job upload transition.
   const session = useDriverSession((s) => s.session);
-  const uploadStates = useDriverSession((s) => s.uploadStates);
-  const completedCount = useDriverSession((s) => s.completedCount);
   const clearSession = useDriverSession((s) => s.clearSession);
   const setMode = useAppStore((s) => s.setMode);
 
-  if (!session) return null;
+  // NOTE: `uploadStates` is deliberately NOT selected here. Each row subscribes
+  // to its own slice (see DriverJobRow), which keeps `renderItem` independent of
+  // upload state — otherwise every photo transition on any job rebuilds the
+  // render callback and re-renders every row in the list.
 
-  const jobs = [...session.jobs].sort(
-    (a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)
+  // One pass for the sort and all four counts. Previously this was a sort plus
+  // three separate `.filter().length` sweeps, all re-run on every render.
+  // `completedCount()` came from the store as a fifth pass; derived here
+  // instead, from data this screen already holds.
+  const { jobs, done, installs, removals, incomplete } = useMemo(() => {
+    const sorted = [...(session?.jobs ?? NO_JOBS)].sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id)
+    );
+    let done = 0, installs = 0, removals = 0;
+    for (const j of sorted) {
+      if (j.isComplete) done++;
+      if (j.jobType === 'install') installs++;
+      else removals++;
+    }
+    return { jobs: sorted, done, installs, removals, incomplete: sorted.length - done };
+  }, [session?.jobs]);
+
+  const openJob = useCallback(
+    (jobId: string) => navigation.navigate('DriverJob', { jobId }),
+    [navigation]
   );
 
+  const renderItem = useCallback(
+    ({ item }: { item: SignJob }) => <DriverJobRow job={item} onOpen={openJob} />,
+    [openJob]
+  );
+
+  // Every hook above must run on every render — hence the early return sits here.
+  if (!session) return null;
+
   function handleSignOut() {
-    const incomplete = jobs.filter((j) => !j.isComplete).length;
     if (incomplete > 0) {
       Alert.alert(
         'Exit Route?',
@@ -56,11 +92,8 @@ export default function DriverRouteScreen({ navigation }: Props) {
     clearSession();
     setMode(AppMode.Undecided);
   }
-  const done = completedCount();
   const total = jobs.length;
   const allComplete = total > 0 && done === total;
-  const installs = jobs.filter((j) => j.jobType === 'install').length;
-  const removals = jobs.filter((j) => j.jobType === 'removal').length;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -114,29 +147,13 @@ export default function DriverRouteScreen({ navigation }: Props) {
       {/* Job list */}
       <FlatList
         data={jobs}
-        keyExtractor={(j) => j.id}
+        keyExtractor={keyExtractor}
         contentContainerStyle={[
           styles.list,
           { paddingBottom: insets.bottom + 24 },
         ]}
-        renderItem={({ item }) => {
-          const uploadState = uploadStates[item.id] ?? { status: 'idle' };
-          const photoTaken = uploadState.status === 'succeeded' || !!item.photoKey;
-          return (
-            <JobCard
-              job={item}
-              uploadState={uploadState}
-              dimWhenComplete
-              onPress={() => navigation.navigate('DriverJob', { jobId: item.id })}
-              footer={
-                <Text style={[styles.photoLabel, { color: photoTaken ? colors.statusComplete : colors.textDisabled }]}>
-                  {photoTaken ? 'Photo captured' : 'Photo required'}
-                </Text>
-              }
-            />
-          );
-        }}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        renderItem={renderItem}
+        ItemSeparatorComponent={Separator}
         ListEmptyComponent={
           <EmptyState
             variant="driver"
@@ -148,6 +165,48 @@ export default function DriverRouteScreen({ navigation }: Props) {
     </View>
   );
 }
+
+// ─── Row ─────────────────────────────────────────────────────────────────────
+
+// Each row subscribes to its OWN upload slice rather than the screen passing
+// `uploadStates` down. That is what keeps the list's renderItem stable: if the
+// screen selected the whole record, every photo transition on any job would
+// produce a new callback identity and re-render every row.
+//
+// memo() then means a transition on job 7 re-renders row 7 and nothing else.
+const DriverJobRow = memo(function DriverJobRow({
+  job,
+  onOpen,
+}: {
+  job: SignJob;
+  onOpen: (jobId: string) => void;
+}) {
+  const rawUploadState = useDriverSession((s) => s.uploadStates[job.id]);
+  const uploadState: JobUploadState = rawUploadState ?? IDLE_UPLOAD_STATE;
+
+  // photoKey covers a job already completed on a previous session, where the
+  // in-memory upload state is 'idle' but the evidence is on the record.
+  const photoTaken = uploadState.status === 'succeeded' || !!job.photoKey;
+
+  return (
+    <JobCard
+      job={job}
+      uploadState={uploadState}
+      dimWhenComplete
+      onPress={() => onOpen(job.id)}
+      footer={
+        <Text
+          style={[
+            styles.photoLabel,
+            { color: photoTaken ? colors.statusComplete : colors.textDisabled },
+          ]}
+        >
+          {photoTaken ? 'Photo captured' : 'Photo required'}
+        </Text>
+      }
+    />
+  );
+});
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 

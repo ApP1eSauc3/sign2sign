@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,11 @@ import { JobCard } from '../components/JobCard';
 import { EmptyState } from '../components/EmptyState';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'AdminRouteDetail'>;
+
+// Stable identities — see DriverRouteScreen for the same reasoning.
+const keyExtractor = (j: SignJob) => j.id;
+const Separator = () => <View style={styles.separator} />;
+const renderItem = ({ item }: { item: SignJob }) => <RouteJobRow job={item} />;
 
 export default function AdminRouteDetailScreen({ route, navigation }: Props) {
   const { routeCodeId, driverSlot, code } = route.params;
@@ -47,10 +52,19 @@ export default function AdminRouteDetailScreen({ route, navigation }: Props) {
 
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
-  const done = jobs.filter((j) => j.isComplete).length;
+  // One pass instead of three separate `.filter().length` sweeps re-run on
+  // every render — including every render caused by pull-to-refresh state.
+  const { done, installs, removals } = useMemo(() => {
+    let done = 0, installs = 0, removals = 0;
+    for (const j of jobs) {
+      if (j.isComplete) done++;
+      if (j.jobType === 'install') installs++;
+      else removals++;
+    }
+    return { done, installs, removals };
+  }, [jobs]);
+
   const total = jobs.length;
-  const installs = jobs.filter((j) => j.jobType === 'install').length;
-  const removals = jobs.filter((j) => j.jobType === 'removal').length;
   const progressPct = total > 0 ? (done / total) * 100 : 0;
 
   return (
@@ -112,7 +126,7 @@ export default function AdminRouteDetailScreen({ route, navigation }: Props) {
       ) : (
         <FlatList
           data={jobs}
-          keyExtractor={(j) => j.id}
+          keyExtractor={keyExtractor}
           contentContainerStyle={[
             styles.list,
             total === 0 && styles.listEmpty,
@@ -125,8 +139,8 @@ export default function AdminRouteDetailScreen({ route, navigation }: Props) {
               tintColor={colors.brand}
             />
           }
-          renderItem={({ item }) => <RouteJobRow job={item} />}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          renderItem={renderItem}
+          ItemSeparatorComponent={Separator}
           ListEmptyComponent={
             <EmptyState
               variant="admin"
@@ -142,7 +156,9 @@ export default function AdminRouteDetailScreen({ route, navigation }: Props) {
 
 // ─── Job row ─────────────────────────────────────────────────────────────────
 
-function RouteJobRow({ job }: { job: SignJob }) {
+// Memoised: admin routes carry the same job counts as driver routes, and a
+// pull-to-refresh re-renders the screen. Without this every row rebuilds.
+const RouteJobRow = memo(function RouteJobRow({ job }: { job: SignJob }) {
   const footer = job.isComplete && job.photoTimestamp ? (
     <Text style={styles.jobCompletedAt}>
       {`Photo · ${new Date(job.photoTimestamp).toLocaleTimeString([], {
@@ -158,7 +174,7 @@ function RouteJobRow({ job }: { job: SignJob }) {
   ) : null;
 
   return <JobCard job={job} bordered footer={footer} />;
-}
+});
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
