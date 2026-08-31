@@ -1,0 +1,103 @@
+-- Sign2Sign — revoke anon's inherited grants on public.code_attempts
+-- Run via: supabase db push
+--
+-- Finishes the grant tightening 013 started. Written 2026-08-31.
+--
+--
+-- ─── What was found, and how ────────────────────────────────────────────────
+--
+-- Post-013 verification (2026-08-31, SQL editor, recorded in CODEBASE_STATUS)
+-- swept every table in `public` for anon reachability:
+--
+--     table          rls   select  insert  update  delete
+--     code_attempts  true  true    true    true    true
+--     jobs           true  false   false   false   false
+--     route_codes    true  false   false   false   false
+--
+-- jobs and route_codes are as 013 intended. (route_codes reporting false for
+-- SELECT is correct, not a regression — has_table_privilege reports TABLE-level
+-- grants, and 006 re-granted a COLUMN subset. That grant/column distinction is
+-- the same one that caused the original P0.)
+--
+-- code_attempts holds the full set for anon: arwdDxtm.
+--
+--
+-- ─── Where the grant came from ──────────────────────────────────────────────
+--
+-- No migration ever granted it. `code_attempts` was created by 006 while the
+-- project still had
+--
+--     alter default privileges in schema public grant all on tables to anon;
+--
+-- in force, so the table was born with anon holding everything. 013 removed
+-- that default — but a default ACL only governs tables created AFTER it
+-- changes; it never revisits tables that already inherited it. 013's revokes
+-- named `jobs` and `route_codes` explicitly and missed this one.
+--
+-- The same audit found the `supabase_admin` default ACL still granting to anon.
+-- That one is NOT fixable from this project: `ALTER DEFAULT PRIVILEGES FOR ROLE
+-- supabase_admin` requires membership in that role, and
+-- `pg_has_role('postgres','supabase_admin','member')` returns false on hosted
+-- Supabase. It is recorded as accepted residual risk in CODEBASE_STATUS.md
+-- rather than silently dropped. Its blast radius is tables created BY
+-- supabase_admin in `public` — which nothing in this project's workflow does.
+--
+--
+-- ─── Why this is a defect and not an incident ───────────────────────────────
+--
+-- RLS is enabled on code_attempts and it has ZERO policies
+-- (`select ... from pg_policy where polrelid = 'public.code_attempts'::regclass`
+-- returned no rows, 2026-08-31). RLS-on-with-no-policies denies everything —
+-- Postgres does not fall back to the grants. So anon cannot currently read or
+-- write this table despite holding arwdDxtm on it.
+--
+-- The exposure is therefore latent, not live. It becomes real the moment anyone
+-- adds a permissive policy for debugging, at which point anon gains DELETE on
+-- the ledger that rate-limits brute-force attempts against driver codes — and
+-- the diff that caused it would look like a one-line policy addition.
+--
+-- Defence in depth: the grant is the gate that should never have been open, and
+-- nothing needs it.
+--
+--
+-- ─── Why nothing legitimate breaks ──────────────────────────────────────────
+--
+-- Every read and write of code_attempts happens inside `validate_route_code()`
+-- (006:80, 006:99, 006:103), which is SECURITY DEFINER and therefore executes
+-- with its owner's privileges, not the caller's. The only caller is the
+-- `validate-code` Edge Function, which holds the service-role key. Neither path
+-- consults anon's grants. No client code touches this table directly — anon has
+-- had no working access to it since it was created, because RLS has always
+-- denied it.
+
+revoke all on table public.code_attempts from anon;
+
+
+-- ─── Verification ───────────────────────────────────────────────────────────
+--
+-- Run AFTER `supabase db push` and record the output with a date in
+-- CODEBASE_STATUS.md. Per CLAUDE.md → Documentation Integrity Rules, a
+-- deployed-state claim needs evidence, not intention.
+--
+--   -- (a) anon holds nothing on code_attempts. Expect zero rows.
+--   select privilege_type from information_schema.table_privileges
+--    where grantee = 'anon' and table_name = 'code_attempts'
+--   union all
+--   select privilege_type from information_schema.column_privileges
+--    where grantee = 'anon' and table_name = 'code_attempts';
+--
+--   -- (b) Full sweep, the same one that found this. Expect code_attempts to
+--   --     join jobs and route_codes at false/false/false/false.
+--   select c.relname, c.relrowsecurity as rls,
+--          has_table_privilege('anon', c.oid, 'select') as sel,
+--          has_table_privilege('anon', c.oid, 'insert') as ins,
+--          has_table_privilege('anon', c.oid, 'update') as upd,
+--          has_table_privilege('anon', c.oid, 'delete') as del
+--     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+--    where n.nspname = 'public' and c.relkind = 'r'
+--    order by 1;
+--
+--   -- (c) Rate limiting still works end to end: submit a wrong driver code
+--   --     6+ times from the app and confirm the throttle still trips. This
+--   --     exercises validate_route_code's SECURITY DEFINER path, which is the
+--   --     thing this migration assumes is unaffected.
