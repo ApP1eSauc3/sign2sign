@@ -305,9 +305,15 @@ const MIME_TYPES = {
 function buildContentSecurityPolicy({ dev }) {
   const scriptSrc = dev ? "'self' 'unsafe-inline' 'unsafe-eval' blob:" : "'self' blob:";
   const styleSrc = "'self' 'unsafe-inline'";
+  // maps.googleapis.com was removed 2026-09-03: geocoding moved behind the
+  // geocode-address Edge Function, so the admin bundle now reaches Google only
+  // through *.supabase.co, which is already allowed. The Google Maps key
+  // cannot be restricted to an app origin, so keeping it out of the client was
+  // the fix; dropping the directive keeps the CSP honest about what this
+  // renderer actually talks to.
   const connectSrc = dev
-    ? "'self' https://*.supabase.co wss://*.supabase.co https://sheets.googleapis.com https://oauth2.googleapis.com https://maps.googleapis.com http://localhost:* ws://localhost:*"
-    : "'self' https://*.supabase.co wss://*.supabase.co https://sheets.googleapis.com https://oauth2.googleapis.com https://maps.googleapis.com";
+    ? "'self' https://*.supabase.co wss://*.supabase.co https://sheets.googleapis.com https://oauth2.googleapis.com http://localhost:* ws://localhost:*"
+    : "'self' https://*.supabase.co wss://*.supabase.co https://sheets.googleapis.com https://oauth2.googleapis.com";
   return [
     "default-src 'self'",
     `script-src ${scriptSrc}`,

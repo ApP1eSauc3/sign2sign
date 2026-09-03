@@ -1,12 +1,26 @@
 import { secureStorage } from '../utils/secureStorage';
-import { supabase } from './supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 import { GoogleAuthService } from './GoogleAuthService';
 import { SignJob, JobType } from '../data/SignJob';
 
 const MAX_IMPORT_ROWS = 500;
 const GOOGLE_TOKEN_KEY = 'google_oauth_token';
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
-const GEOCODING_API = 'https://maps.googleapis.com/maps/api/geocode/json';
+
+// Geocoding goes through our own Edge Function, never to Google directly.
+//
+// Google Maps Platform web service APIs accept only an IP-address application
+// restriction — not an iOS bundle ID, not an Android signature
+// (https://developers.google.com/maps/api-security-best-practices, verified
+// 2026-09-03). An IP allowlist cannot describe an admin laptop, so a key
+// shipped in this bundle would be an unrestricted key on the client's billing
+// account, extractable by anyone who installs the app. Google's guidance for
+// this exact case is to proxy, so the key lives as a Supabase secret and
+// EXPO_PUBLIC_GOOGLE_MAPS_API_KEY no longer exists.
+//
+// The function returns Google's own `{ status, results }` shape, so the retry
+// logic below is unchanged from when it spoke to Google directly.
+const GEOCODE_FUNCTION = `${SUPABASE_URL}/functions/v1/geocode-address`;
 
 // Geocoding runs concurrently, but not unboundedly. The Geocoding API's
 // documented default quota is 25 QPS per project with a 3,000/minute ceiling
@@ -77,6 +91,40 @@ function detectJobType(agentText: string, notesText: string): JobType {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+// Proxy-side failures that no amount of backoff will clear. Each maps to a
+// message naming the thing an operator can actually go and fix — the whole
+// reason for distinguishing them from a transient 5xx.
+//
+// `server_key_missing` is the one that matters most: it is what a deployment
+// with no GOOGLE_MAPS_API_KEY secret looks like from here, and before this
+// mapping existed it would have surfaced as "Geocoding request failed (503)"
+// after three pointless retries.
+const PERMANENT_GEOCODE_ERRORS: Record<string, string> = {
+  server_key_missing:
+    'Address lookup is not configured on the server — the GOOGLE_MAPS_API_KEY secret is not set. See the Maps key runbook in the handover.',
+  unauthorized:
+    'Your admin session has expired. Sign out, sign in again, and retry the import.',
+  invalid_address:
+    'The server rejected an address as empty or too long.',
+  payload_too_large:
+    'The server rejected an address as too long.',
+  method_not_allowed:
+    'Address lookup rejected the request. The geocode-address function may be out of date — redeploy it.',
+};
+
+// Proxy errors arrive as { "error": "<code>" }. A success carries `status`
+// instead, so the two shapes never collide. Never throws: a body that is not
+// JSON at all (an HTML error page from the gateway, say) simply means we have
+// no code to act on, and the caller falls back to status-based handling.
+async function readProxyErrorCode(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    return typeof body.error === 'string' ? body.error : null;
+  } catch {
+    return null;
+  }
+}
+
 // Retries only the transient shapes: the API's own OVER_QUERY_LIMIT status (a
 // 200 response body, not an HTTP error), HTTP 429, and 5xx. Everything else —
 // ZERO_RESULTS, REQUEST_DENIED, a bad key — is permanent, and retrying it just
@@ -86,16 +134,26 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 // import and the admin had to start over.
 async function geocodeAddress(
   address: string,
-  apiKey: string
+  accessToken: string
 ): Promise<{ latitude: number; longitude: number }> {
-  const url = `${GEOCODING_API}?address=${encodeURIComponent(address)}&region=au&key=${apiKey}`;
-
   for (let attempt = 0; ; attempt++) {
     const canRetry = attempt < GEOCODE_MAX_RETRIES;
 
     let response: Response;
     try {
-      response = await fetch(url);
+      response = await fetch(GEOCODE_FUNCTION, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // The gateway routes on the anon apikey; the bearer token is the
+          // admin's own session, which the function resolves to a real
+          // auth.users row. The anon key would satisfy the gateway's JWT
+          // check but not that lookup — which is the point.
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ address }),
+      });
     } catch (err) {
       // fetch rejects only on network failure.
       if (canRetry) {
@@ -105,15 +163,24 @@ async function geocodeAddress(
       throw new Error(`Geocoding request failed — check your connection.`);
     }
 
-    if (response.status === 429 || response.status >= 500) {
-      if (canRetry) {
-        await sleep(GEOCODE_BACKOFF_BASE_MS * 2 ** attempt);
-        continue;
+    if (!response.ok) {
+      // A proxy-side refusal that retrying cannot fix must not be spent on
+      // three rounds of backoff and then reported as a generic 503. These are
+      // operator errors, and the message is the whole value of catching them.
+      const proxyError = await readProxyErrorCode(response);
+      const permanent = proxyError ? PERMANENT_GEOCODE_ERRORS[proxyError] : undefined;
+      if (permanent) throw new Error(permanent);
+
+      if (response.status === 429 || response.status >= 500) {
+        if (canRetry) {
+          await sleep(GEOCODE_BACKOFF_BASE_MS * 2 ** attempt);
+          continue;
+        }
+        throw new Error(`Geocoding request failed (${response.status})`);
       }
+
       throw new Error(`Geocoding request failed (${response.status})`);
     }
-
-    if (!response.ok) throw new Error(`Geocoding request failed (${response.status})`);
 
     const json = await response.json() as {
       status: string;
@@ -223,10 +290,15 @@ export const GoogleSheetsService = {
     const token = await GoogleSheetsService.getStoredToken();
     if (!token) throw new Error('No Google OAuth token stored. Authenticate first.');
 
-    const mapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!mapsApiKey) {
+    // Geocoding runs through the geocode-address Edge Function, which requires
+    // the caller's own admin session — not the anon key, which is public and
+    // would let any handset spend the geocoding budget. Fetched once here
+    // rather than per address so a 40-address import does one session read.
+    const { data: authData } = await supabase.auth.getSession();
+    const accessToken = authData.session?.access_token;
+    if (!accessToken) {
       throw new Error(
-        'EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is not set — required to geocode addresses during import.'
+        'You are not signed in — sign in as an admin before importing jobs.'
       );
     }
 
@@ -341,7 +413,7 @@ export const GoogleSheetsService = {
     const { results, failure } = await mapWithConcurrency(
       uniqueAddresses,
       GEOCODE_CONCURRENCY,
-      (address) => geocodeAddress(address, mapsApiKey)
+      (address) => geocodeAddress(address, accessToken)
     );
 
     if (failure) {

@@ -57,14 +57,20 @@ export default function DriverMapScreen({ navigation }: Props) {
   const total = jobs.length;
   const allComplete = total > 0 && done === total;
 
+  // The route code is the credential optimize-route checks before spending a
+  // billable request. Read here and passed in, because services never read
+  // stores — the same rule that makes photo upload take `currentLocation` as
+  // a parameter.
+  const routeCode = session?.routeCode ?? '';
+
   useEffect(() => {
-    if (jobs.length === 0) {
+    if (jobs.length === 0 || !routeCode) {
       setRouteLoading(false);
       return;
     }
     let cancelled = false;
-    RouteService.computeRoute(jobs).then((result) => {
-      if (cancelled) return;   // screen left before Directions answered
+    RouteService.computeRoute(jobs, routeCode).then((result) => {
+      if (cancelled) return;   // screen left before the route came back
       setOrderedJobIds(result.orderedJobs.map(j => j.id));
       setPolylineCoords(result.polylineCoords);
       // A straight-line fallback must not be presented as a real driving route.
@@ -157,7 +163,7 @@ export default function DriverMapScreen({ navigation }: Props) {
               //
               // `routeIndex` MUST be in here. The screen mounts and paints the
               // pins in sort_order while computeRoute is still in flight; when
-              // Directions answers a second later, displayJobs reorders and
+              // the optimised route answers a second later, displayJobs reorders and
               // every pin's number changes. Without the index in the key those
               // numbers are frozen at the pre-optimisation order — the polyline
               // would show the optimised route while the pins counted in sheet

@@ -1,23 +1,18 @@
 import { SignJob } from '../../data/SignJob';
 
-// MAPS_API_KEY is read from process.env at module load, so each test group has
-// to (re)load the module with the env it wants. Static imports hoist above any
-// assignment, hence require() behind jest.resetModules().
-function loadService(apiKey?: string) {
-  jest.resetModules();
-  if (apiKey === undefined) {
-    delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-  } else {
-    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = apiKey;
-  }
-  return require('../RouteService') as typeof import('../RouteService');
-}
+// RouteService no longer reads an API key from process.env — the key lives in
+// a Supabase secret and the service calls the optimize-route Edge Function.
+// What it needs from the client module is the project URL and the anon key
+// (gateway routing), so those are what the mock supplies.
+jest.mock('../supabaseClient', () => ({
+  SUPABASE_URL: 'https://test.supabase.co',
+  SUPABASE_ANON_KEY: 'test-anon-key',
+}));
 
-const originalEnv = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-afterAll(() => {
-  if (originalEnv === undefined) delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-  else process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = originalEnv;
-});
+import { RouteService, __testing } from '../RouteService';
+
+const FUNCTION_URL = 'https://test.supabase.co/functions/v1/optimize-route';
+const ROUTE_CODE = '123456';
 
 function makeJob(id: string, sortOrder: number, over: Partial<SignJob> = {}): SignJob {
   return {
@@ -49,9 +44,21 @@ function mockFetchOnce(body: unknown, ok = true, status = 200) {
   return fetchMock;
 }
 
+// Parse the JSON body the service sent on its first (only) call.
+function sentBody(fetchMock: jest.Mock): { code: string; coordinates: unknown[] } {
+  return JSON.parse(fetchMock.mock.calls[0][1].body);
+}
+
+// A well-formed optimize-route success response.
+function okRoute(optimizedIndex: number[], polyline = GOOGLE_EXAMPLE_POLYLINE) {
+  return { optimizedIndex, encodedPolyline: polyline };
+}
+
 // Google's own worked example from the encoded polyline algorithm reference:
 // (38.5, -120.2), (40.7, -120.95), (43.252, -126.453).
 // Verified against this decoder on 2026-08-21 before being pinned here.
+// The Routes API encodes polylines with the same algorithm as the legacy
+// Directions API, so this vector survived the 2026-09-03 migration unchanged.
 const GOOGLE_EXAMPLE_POLYLINE = '_p~iF~ps|U_ulLnnqC_mqNvxq`@';
 const GOOGLE_EXAMPLE_POINTS = [
   { latitude: 38.5, longitude: -120.2 },
@@ -62,8 +69,6 @@ const GOOGLE_EXAMPLE_POINTS = [
 // ─── decodePolyline ──────────────────────────────────────────────────────────
 
 describe('decodePolyline', () => {
-  const { __testing } = loadService('test-key');
-
   it('decodes Google\'s reference example exactly', () => {
     expect(__testing.decodePolyline(GOOGLE_EXAMPLE_POLYLINE)).toEqual(GOOGLE_EXAMPLE_POINTS);
   });
@@ -104,7 +109,6 @@ describe('decodePolyline', () => {
 // ─── isValidPermutation ──────────────────────────────────────────────────────
 
 describe('isValidPermutation', () => {
-  const { __testing } = loadService('test-key');
   const isValid = __testing.isValidPermutation;
 
   it('accepts a genuine permutation in any order', () => {
@@ -127,20 +131,18 @@ describe('isValidPermutation', () => {
 // ─── computeRoute — trivial inputs ───────────────────────────────────────────
 
 describe('computeRoute — trivial inputs', () => {
-  const { RouteService } = loadService('test-key');
-
   it('returns an empty, non-degraded result for no jobs', async () => {
     const fetchMock = mockFetchOnce({});
-    const result = await RouteService.computeRoute([]);
+    const result = await RouteService.computeRoute([], ROUTE_CODE);
 
     expect(result).toEqual({ orderedJobs: [], polylineCoords: [], degraded: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('short-circuits a single job without calling Directions', async () => {
+  it('short-circuits a single job without calling the route proxy', async () => {
     const fetchMock = mockFetchOnce({});
     const [job] = makeJobs(1);
-    const result = await RouteService.computeRoute([job]);
+    const result = await RouteService.computeRoute([job], ROUTE_CODE);
 
     expect(result.orderedJobs).toEqual([job]);
     expect(result.polylineCoords).toEqual([{ latitude: job.latitude, longitude: job.longitude }]);
@@ -149,56 +151,108 @@ describe('computeRoute — trivial inputs', () => {
   });
 });
 
-// ─── computeRoute — no API key ───────────────────────────────────────────────
+// ─── computeRoute — the request it sends ─────────────────────────────────────
 
-describe('computeRoute — without an API key', () => {
-  it('falls back to sort_order and flags the degradation', async () => {
-    const { RouteService } = loadService(undefined);
-    const fetchMock = mockFetchOnce({});
+describe('computeRoute — request shape', () => {
+  it('posts the route code and the ordered coordinates to the Edge Function', async () => {
+    const fetchMock = mockFetchOnce(okRoute([2, 0, 1]));
+
+    await RouteService.computeRoute(makeJobs(5), ROUTE_CODE);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(FUNCTION_URL);
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.method).toBe('POST');
+    // Drivers have no Supabase Auth account — the anon key only routes the
+    // call through the gateway; the route code is the actual credential.
+    expect(init.headers.apikey).toBe('test-anon-key');
+    expect(init.headers.Authorization).toBe('Bearer test-anon-key');
+
+    const body = sentBody(fetchMock);
+    expect(body.code).toBe(ROUTE_CODE);
+    expect(body.coordinates).toHaveLength(5);
+  });
+
+  // The key never leaves the server. If it ever reappears in a request from
+  // the client, the whole reason for the proxy has been undone.
+  it('never sends an API key of its own', async () => {
+    const fetchMock = mockFetchOnce(okRoute([2, 0, 1]));
+    await RouteService.computeRoute(makeJobs(5), ROUTE_CODE);
+
+    const serialised = JSON.stringify(fetchMock.mock.calls[0]);
+    expect(serialised).not.toMatch(/AIza/);
+    expect(serialised.toLowerCase()).not.toContain('x-goog-api-key');
+  });
+
+  it('sends coordinates in sort_order, not the order supplied', async () => {
+    const fetchMock = mockFetchOnce(okRoute([]));
+    const jobs = [makeJob('b', 2), makeJob('a', 1)];
+
+    await RouteService.computeRoute(jobs, ROUTE_CODE);
+
+    const body = sentBody(fetchMock);
+    expect(body.coordinates).toEqual([
+      { latitude: makeJob('a', 1).latitude, longitude: makeJob('a', 1).longitude },
+      { latitude: makeJob('b', 2).latitude, longitude: makeJob('b', 2).longitude },
+    ]);
+  });
+});
+
+// ─── computeRoute — server key missing ───────────────────────────────────────
+//
+// Before the proxy this branch fired when EXPO_PUBLIC_GOOGLE_MAPS_API_KEY was
+// unset in the bundle. The key now lives in a Supabase secret, so the same
+// condition is reported by the function as a 503, and must still reach the
+// driver as "optimisation is off" rather than "check your signal".
+
+describe('computeRoute — when the server has no key', () => {
+  it('falls back to sort_order and flags no-api-key', async () => {
+    const fetchMock = mockFetchOnce({ error: 'server_key_missing' }, false, 503);
 
     const jobs = [makeJob('b', 2), makeJob('a', 1)];
-    const result = await RouteService.computeRoute(jobs);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.orderedJobs.map((j) => j.id)).toEqual(['a', 'b']);
     expect(result.degraded).toBe(true);
     expect(result.degradedReason).toBe('no-api-key');
   });
 
   it('breaks sort_order ties deterministically by id', async () => {
-    const { RouteService } = loadService(undefined);
-    mockFetchOnce({});
+    mockFetchOnce({ error: 'server_key_missing' }, false, 503);
 
     const jobs = [makeJob('zz', 1), makeJob('aa', 1), makeJob('mm', 1)];
-    const result = await RouteService.computeRoute(jobs);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
 
     expect(result.orderedJobs.map((j) => j.id)).toEqual(['aa', 'mm', 'zz']);
+  });
+
+  // A rejected code is not a missing key. Conflating them would tell a driver
+  // optimisation is switched off when in fact their code expired.
+  it('reports a rejected route code as a request failure, not a missing key', async () => {
+    mockFetchOnce({ error: 'invalid_code' }, false, 403);
+
+    const result = await RouteService.computeRoute(makeJobs(5), ROUTE_CODE);
+    expect(result.degradedReason).toBe('request-failed');
   });
 });
 
 // ─── computeRoute — the waypoint cap ─────────────────────────────────────────
 //
-// Google Directions allows at most 25 intermediate waypoints, optimized or not
-// (verified against the API reference 2026-08-21). origin and destination do
-// not count, so the cap bites at 28 jobs.
+// The Routes API allows at most 25 intermediate waypoints, the same ceiling
+// the legacy Directions API had (verified 2026-09-03). origin and destination
+// do not count, so the cap bites at 28 jobs.
 
 describe('computeRoute — waypoint cap', () => {
-  const { RouteService, __testing } = loadService('test-key');
-
   it('pins the documented cap at 25', () => {
     expect(__testing.MAX_INTERMEDIATE_WAYPOINTS).toBe(25);
   });
 
-  it('still calls Directions at exactly the cap (27 jobs = 25 intermediate)', async () => {
-    const fetchMock = mockFetchOnce({
-      status: 'OK',
-      routes: [{
-        overview_polyline: { points: GOOGLE_EXAMPLE_POLYLINE },
-        waypoint_order: Array.from({ length: 25 }, (_, i) => i),
-      }],
-    });
+  it('still calls the proxy at exactly the cap (27 jobs = 25 intermediate)', async () => {
+    const fetchMock = mockFetchOnce(okRoute(Array.from({ length: 25 }, (_, i) => i)));
 
-    const result = await RouteService.computeRoute(makeJobs(27));
+    const result = await RouteService.computeRoute(makeJobs(27), ROUTE_CODE);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.degraded).toBe(false);
@@ -211,7 +265,7 @@ describe('computeRoute — waypoint cap', () => {
     const fetchMock = mockFetchOnce({});
 
     const jobs = makeJobs(28);
-    const result = await RouteService.computeRoute(jobs);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.degraded).toBe(true);
@@ -223,7 +277,7 @@ describe('computeRoute — waypoint cap', () => {
 
   it('skips it for a large route too', async () => {
     const fetchMock = mockFetchOnce({});
-    const result = await RouteService.computeRoute(makeJobs(120));
+    const result = await RouteService.computeRoute(makeJobs(120), ROUTE_CODE);
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.degradedReason).toBe('too-many-waypoints');
@@ -233,42 +287,28 @@ describe('computeRoute — waypoint cap', () => {
 // ─── computeRoute — happy path ───────────────────────────────────────────────
 
 describe('computeRoute — optimized response', () => {
-  const { RouteService } = loadService('test-key');
-
-  it('requests optimization and rebuilds the order Google returned', async () => {
-    const fetchMock = mockFetchOnce({
-      status: 'OK',
-      routes: [{
-        overview_polyline: { points: GOOGLE_EXAMPLE_POLYLINE },
-        waypoint_order: [2, 0, 1],
-      }],
-    });
+  it('rebuilds the order the Routes API returned', async () => {
+    const fetchMock = mockFetchOnce(okRoute([2, 0, 1]));
 
     // 5 jobs: first and last are origin/destination, middle three get reordered.
-    const result = await RouteService.computeRoute(makeJobs(5));
-
-    const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).toContain('optimize%3Atrue');
+    const result = await RouteService.computeRoute(makeJobs(5), ROUTE_CODE);
 
     expect(result.orderedJobs.map((j) => j.id)).toEqual([
-      'job-1',            // origin, fixed
-      'job-4', 'job-2', 'job-3',  // middle, per waypoint_order [2,0,1]
-      'job-5',            // destination, fixed
+      'job-1',                    // origin, fixed
+      'job-4', 'job-2', 'job-3',  // middle, per optimizedIndex [2,0,1]
+      'job-5',                    // destination, fixed
     ]);
     expect(result.polylineCoords).toEqual(GOOGLE_EXAMPLE_POINTS);
     expect(result.degraded).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('handles a two-job route, which has no intermediate waypoints', async () => {
-    const fetchMock = mockFetchOnce({
-      status: 'OK',
-      routes: [{ overview_polyline: { points: GOOGLE_EXAMPLE_POLYLINE } }],
-    });
+    const fetchMock = mockFetchOnce(okRoute([]));
 
-    const result = await RouteService.computeRoute(makeJobs(2));
+    const result = await RouteService.computeRoute(makeJobs(2), ROUTE_CODE);
 
-    const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).not.toContain('waypoints');
+    expect(sentBody(fetchMock).coordinates).toHaveLength(2);
     expect(result.orderedJobs.map((j) => j.id)).toEqual(['job-1', 'job-2']);
     expect(result.degraded).toBe(false);
   });
@@ -277,74 +317,94 @@ describe('computeRoute — optimized response', () => {
 // ─── computeRoute — failure paths ────────────────────────────────────────────
 
 describe('computeRoute — failure paths all degrade rather than throw', () => {
-  const { RouteService } = loadService('test-key');
   const jobs = makeJobs(5);
 
   it('degrades when fetch rejects (offline mid-route)', async () => {
     (globalThis as { fetch?: unknown }).fetch = jest.fn().mockRejectedValue(new Error('offline'));
 
-    const result = await RouteService.computeRoute(jobs);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
     expect(result.degraded).toBe(true);
     expect(result.degradedReason).toBe('request-failed');
     expect(result.orderedJobs).toHaveLength(5);
   });
 
   it('degrades on a non-2xx response', async () => {
-    mockFetchOnce({}, false, 500);
-    const result = await RouteService.computeRoute(jobs);
+    mockFetchOnce({ error: 'upstream_rejected' }, false, 502);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
     expect(result.degradedReason).toBe('request-failed');
   });
 
-  it('degrades on unparseable JSON', async () => {
+  // An error page from the gateway is not JSON at all. Reading the status
+  // first keeps that from being reported as a malformed route.
+  it('degrades on unparseable JSON from a failed response', async () => {
+    (globalThis as { fetch?: unknown }).fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => { throw new SyntaxError('bad json'); },
+    });
+
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
+    expect(result.degradedReason).toBe('request-failed');
+  });
+
+  it('degrades on unparseable JSON from a 200', async () => {
     (globalThis as { fetch?: unknown }).fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => { throw new SyntaxError('bad json'); },
     });
 
-    const result = await RouteService.computeRoute(jobs);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
     expect(result.degradedReason).toBe('bad-response');
   });
 
-  it('degrades on a non-OK Directions status such as ZERO_RESULTS', async () => {
-    mockFetchOnce({ status: 'ZERO_RESULTS', routes: [] });
-    const result = await RouteService.computeRoute(jobs);
+  // The function answers 200 with an `error` when Google gave it a response it
+  // could not use — no drivable path, or an order it refused to trust.
+  it.each([
+    ['no_route'],
+    ['no_waypoint_order'],
+    ['bad_waypoint_order'],
+  ] as const)('degrades on a 200 carrying error=%s', async (error) => {
+    mockFetchOnce({ error });
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
     expect(result.degradedReason).toBe('bad-response');
   });
 
   it('degrades when the polyline is missing', async () => {
-    mockFetchOnce({ status: 'OK', routes: [{ waypoint_order: [0, 1, 2] }] });
-    const result = await RouteService.computeRoute(jobs);
+    mockFetchOnce({ optimizedIndex: [0, 1, 2] });
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
     expect(result.degradedReason).toBe('bad-response');
   });
 
-  // The crash this guard exists to prevent: a short/duplicated waypoint_order
+  it('degrades when the polyline decodes to nothing', async () => {
+    mockFetchOnce(okRoute([0, 1, 2], ''));
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
+    expect(result.degradedReason).toBe('bad-response');
+  });
+
+  // The crash this guard exists to prevent: a short/duplicated waypoint order
   // put `undefined` into orderedJobs, which then blew up on `job.id` in
-  // DriverMapScreen — two layers away from the cause.
+  // DriverMapScreen — two layers away from the cause. The function validates
+  // this too now; the client keeps its own check because a hole here is a
+  // crash, and the cost of re-checking is three comparisons.
   it.each([
     ['too short', [0, 1]],
     ['duplicated index', [0, 0, 1]],
     ['out of range', [0, 1, 9]],
-  ] as const)('degrades rather than emitting holes when waypoint_order is %s', async (_label, order) => {
-    mockFetchOnce({
-      status: 'OK',
-      routes: [{ overview_polyline: { points: GOOGLE_EXAMPLE_POLYLINE }, waypoint_order: order }],
-    });
+  ] as const)('degrades rather than emitting holes when optimizedIndex is %s', async (_label, order) => {
+    mockFetchOnce(okRoute(order as unknown as number[]));
 
-    const result = await RouteService.computeRoute(jobs);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
 
     expect(result.degradedReason).toBe('bad-response');
     expect(result.orderedJobs).toHaveLength(5);
     expect(result.orderedJobs.every((j) => j !== undefined)).toBe(true);
   });
 
-  it('degrades when waypoint_order is absent but waypoints were sent', async () => {
-    mockFetchOnce({
-      status: 'OK',
-      routes: [{ overview_polyline: { points: GOOGLE_EXAMPLE_POLYLINE } }],
-    });
+  it('degrades when optimizedIndex is absent but waypoints were sent', async () => {
+    mockFetchOnce({ encodedPolyline: GOOGLE_EXAMPLE_POLYLINE });
 
-    const result = await RouteService.computeRoute(jobs);
+    const result = await RouteService.computeRoute(jobs, ROUTE_CODE);
     expect(result.degradedReason).toBe('bad-response');
   });
 });

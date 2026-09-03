@@ -7,7 +7,7 @@ import { SignJob } from '../../data/SignJob';
 // Two sources have to be reconciled on every render:
 //
 //   * `orderedJobIds` — the optimized sequence RouteService got back from
-//     Directions. Captured once when the screen mounts, so it is a snapshot.
+//     the Routes API. Captured once when the screen mounts, so it is a snapshot.
 //   * `jobs` — the live job objects from the store, which change as the driver
 //     completes work.
 //

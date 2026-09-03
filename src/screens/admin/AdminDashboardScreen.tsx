@@ -342,7 +342,7 @@ export default function AdminDashboardScreen({ navigation }: Props) {
             <Text style={styles.sheetFormatRow}>F  Printed  <Text style={styles.sheetFormatHint}>(skipped)</Text></Text>
             <Text style={styles.sheetFormatRow}>G  Address  <Text style={styles.sheetFormatHint}>(required — geocoded on import)</Text></Text>
             <Text style={styles.sheetFormatNote}>
-              Only rows matching the import date are imported. Addresses are geocoded automatically — requires EXPO_PUBLIC_GOOGLE_MAPS_API_KEY. Agent email is left blank; add it via the route detail screen before sending completion emails.
+              Only rows matching the import date are imported. Addresses are geocoded automatically. Agent email is left blank; add it via the route detail screen before sending completion emails.
             </Text>
           </View>
 

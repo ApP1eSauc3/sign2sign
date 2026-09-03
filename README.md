@@ -119,7 +119,7 @@ sign2sign/
     │   ├── JobPhotoService.ts      Camera capture, Storage upload, mark complete
     │   ├── GoogleSheetsService.ts  Job import from Google Sheets
     │   ├── GoogleAuthService.ts    OAuth2 token management for Sheets
-    │   ├── RouteService.ts         Driving-route optimisation (Google Directions; straight-line fallback)
+    │   ├── RouteService.ts         Driving-route optimisation (Routes API via the optimize-route Edge Function; straight-line fallback)
     │   └── OfflineQueueService.ts  AsyncStorage queue for offline operations
     ├── stores/
     │   ├── useAppStore.ts          AppMode — root navigation signal
@@ -324,12 +324,15 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS=...
 EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB=...
 
-# Optional — Google Directions for the driver map's optimised route.
-# Without it, RouteService falls back to straight-line connections.
-# Note: Directions allows at most 25 intermediate waypoints, so routes of
-# 28+ jobs also fall back to straight lines even with the key set.
-EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=...
 ```
+
+**There is deliberately no Google Maps key here.** Geocoding (Sheets import)
+and route optimisation (driver map) both run through Edge Functions that hold
+the key as a Supabase secret — `supabase secrets set GOOGLE_MAPS_API_KEY=…`.
+Google Maps web service APIs cannot be restricted to an app bundle ID, only to
+IP addresses, so a key in this file would ship in the bundle unrestricted. See
+`supabase/functions/geocode-address/index.ts` for the full reasoning, and the
+handover's Maps key runbook for setup.
 
 The service role key is never used in the app. Admin write access is controlled via Supabase Auth sessions and RLS policies.
 

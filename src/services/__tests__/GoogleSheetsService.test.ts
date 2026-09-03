@@ -5,7 +5,15 @@ import { GoogleAuthService } from '../GoogleAuthService';
 jest.mock('../../utils/secureStorage', () => ({
   secureStorage: { getItem: jest.fn(), setItem: jest.fn(), removeItem: jest.fn() },
 }));
-jest.mock('../supabaseClient', () => ({ supabase: {} }));
+// Geocoding now goes through the geocode-address Edge Function, so the service
+// needs the project URL, the anon key (gateway routing) and the admin's own
+// access token (the function resolves it to an auth.users row).
+const mockGetSession = jest.fn();
+jest.mock('../supabaseClient', () => ({
+  supabase: { auth: { getSession: (...args: unknown[]) => mockGetSession(...args) } },
+  SUPABASE_URL: 'https://test.supabase.co',
+  SUPABASE_ANON_KEY: 'test-anon-key',
+}));
 jest.mock('../GoogleAuthService', () => ({
   GoogleAuthService: { refreshAccessToken: jest.fn() },
 }));
@@ -40,7 +48,7 @@ function geocodeOk(lat = -31.95, lng = 115.86) {
 function installFetch(rows: Row[]) {
   (global.fetch as jest.Mock).mockImplementation((url: string) => {
     if (url.includes('sheets.googleapis.com')) return Promise.resolve(sheetsResponse(rows));
-    if (url.includes('maps/api/geocode')) return Promise.resolve(geocodeOk());
+    if (url.includes('functions/v1/geocode-address')) return Promise.resolve(geocodeOk());
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
@@ -48,7 +56,7 @@ function installFetch(rows: Row[]) {
 beforeEach(() => {
   global.fetch = jest.fn();
   mockGetItem.mockResolvedValue('fake-token');
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = 'test-maps-key';
+  mockGetSession.mockResolvedValue({ data: { session: { access_token: 'admin-jwt' } } });
 });
 
 describe('importJobs — row parsing & column mapping', () => {
@@ -109,7 +117,7 @@ describe('importJobs — row parsing & column mapping', () => {
       [SERIAL_TODAY, 'C', 'A', 'n', '', '', '5 Same St'],
     ]);
     await GoogleSheetsService.importJobs('sheet-1', 'Orders', IMPORT_DATE);
-    const geocodeCalls = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('maps/api/geocode'));
+    const geocodeCalls = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('functions/v1/geocode-address'));
     expect(geocodeCalls).toHaveLength(1);
   });
 
@@ -128,9 +136,64 @@ describe('importJobs — error paths', () => {
     await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE)).rejects.toThrow(/No Google OAuth token/i);
   });
 
-  it('throws when the Maps API key is not configured', async () => {
-    delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE)).rejects.toThrow(/GOOGLE_MAPS_API_KEY is not set/i);
+  it('throws when there is no admin session to authorise geocoding', async () => {
+    mockGetSession.mockResolvedValue({ data: { session: null } });
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE)).rejects.toThrow(/not signed in/i);
+  });
+
+  // The geocode proxy authenticates with the ADMIN's token, not the anon key.
+  // The anon key would satisfy the gateway's JWT check — it is itself a valid
+  // JWT — but not the function's auth.users lookup. Getting this wrong would
+  // hand every driver handset the geocoding budget, so it is pinned here.
+  it('sends the admin access token, not the anon key, to the geocode proxy', async () => {
+    installFetch([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]);
+    await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
+
+    const call = (global.fetch as jest.Mock).mock.calls.find(([u]) =>
+      String(u).includes('functions/v1/geocode-address')
+    )!;
+    expect(call[1].headers.Authorization).toBe('Bearer admin-jwt');
+    expect(call[1].headers.apikey).toBe('test-anon-key');
+    expect(JSON.parse(call[1].body)).toEqual({ address: '1 St' });
+  });
+
+  // A missing server secret is an operator error, not a transient fault.
+  // Before this was distinguished it burned three rounds of backoff and then
+  // reported "Geocoding request failed (503)", which names nothing fixable.
+  it('fails fast, and namefully, when the server key secret is unset', async () => {
+    let attempts = 0;
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      if (url.includes('sheets.googleapis.com')) {
+        return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]));
+      }
+      if (url.includes('functions/v1/geocode-address')) {
+        attempts++;
+        return Promise.resolve({ ok: false, status: 503, json: async () => ({ error: 'server_key_missing' }) });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE))
+      .rejects.toThrow(/GOOGLE_MAPS_API_KEY secret is not set/i);
+    expect(attempts).toBe(1);
+  });
+
+  it('reports an expired admin session from the proxy without retrying', async () => {
+    let attempts = 0;
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      if (url.includes('sheets.googleapis.com')) {
+        return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]));
+      }
+      if (url.includes('functions/v1/geocode-address')) {
+        attempts++;
+        return Promise.resolve({ ok: false, status: 401, json: async () => ({ error: 'unauthorized' }) });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE))
+      .rejects.toThrow(/session has expired/i);
+    expect(attempts).toBe(1);
   });
 
   it('throws a date-specific message when no rows match', async () => {
@@ -141,7 +204,7 @@ describe('importJobs — error paths', () => {
   it('wraps a geocoding failure with the source row number', async () => {
     (global.fetch as jest.Mock).mockImplementation((url: string) => {
       if (url.includes('sheets.googleapis.com')) return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', 'Nowhere']]));
-      if (url.includes('maps/api/geocode')) return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) });
+      if (url.includes('functions/v1/geocode-address')) return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) });
       throw new Error('unexpected');
     });
     await expect(GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE)).rejects.toThrow(/Row 2: Could not geocode "Nowhere"/);
@@ -156,7 +219,7 @@ describe('importJobs — error paths', () => {
         if (sheetsCalls === 1) return Promise.resolve({ ok: false, status: 401, json: async () => ({}) });
         return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]));
       }
-      if (url.includes('maps/api/geocode')) return Promise.resolve(geocodeOk());
+      if (url.includes('functions/v1/geocode-address')) return Promise.resolve(geocodeOk());
       throw new Error('unexpected');
     });
 
@@ -291,7 +354,7 @@ describe('importJobs — geocoding concurrency', () => {
       if (String(url).includes('sheets.googleapis.com')) {
         return Promise.resolve(sheetsResponse(rows));
       }
-      if (String(url).includes('maps/api/geocode')) {
+      if (String(url).includes('functions/v1/geocode-address')) {
         inFlight++;
         maxInFlight = Math.max(maxInFlight, inFlight);
         return new Promise((resolve) => {
@@ -346,7 +409,7 @@ describe('importJobs — geocoding concurrency', () => {
 
     const jobs = await GoogleSheetsService.importJobs('s', 'Orders', IMPORT_DATE);
     const geocodeCalls = (global.fetch as jest.Mock).mock.calls.filter(([u]) =>
-      String(u).includes('maps/api/geocode')
+      String(u).includes('functions/v1/geocode-address')
     );
 
     expect(geocodeCalls).toHaveLength(2);
@@ -364,14 +427,18 @@ describe('importJobs — geocoding concurrency', () => {
       [SERIAL_TODAY, 'C', 'A', 'n', '', '', 'Bad Late St'],    // row 4
     ];
 
-    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+    // Since geocoding moved behind the Edge Function the address travels in the
+    // POST body, not the query string — so the per-address branching reads the
+    // body rather than the URL. The timing this test depends on is unchanged.
+    (global.fetch as jest.Mock).mockImplementation((url: string, init?: { body?: string }) => {
       const u = String(url);
       if (u.includes('sheets.googleapis.com')) return Promise.resolve(sheetsResponse(rows));
-      if (u.includes('maps/api/geocode')) {
+      if (u.includes('functions/v1/geocode-address')) {
+        const address = JSON.parse(init?.body ?? '{}').address as string;
         const zeroResults = { ok: true, status: 200, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) };
         // The LATER row fails immediately; the earlier one fails after a delay.
-        if (u.includes('Bad%20Late%20St')) return Promise.resolve(zeroResults);
-        if (u.includes('Bad%20Early%20St')) {
+        if (address === 'Bad Late St') return Promise.resolve(zeroResults);
+        if (address === 'Bad Early St') {
           return new Promise((resolve) => setTimeout(() => resolve(zeroResults), 30));
         }
         return Promise.resolve(geocodeOk());
@@ -395,7 +462,7 @@ describe('importJobs — geocoding concurrency', () => {
 
     // The old single-pass loop geocoded 500 addresses before discovering row 501.
     const geocodeCalls = (global.fetch as jest.Mock).mock.calls.filter(([u]) =>
-      String(u).includes('maps/api/geocode')
+      String(u).includes('functions/v1/geocode-address')
     );
     expect(geocodeCalls).toHaveLength(0);
   });
@@ -409,7 +476,7 @@ describe('importJobs — geocoding retry', () => {
       if (u.includes('sheets.googleapis.com')) {
         return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]));
       }
-      if (u.includes('maps/api/geocode')) {
+      if (u.includes('functions/v1/geocode-address')) {
         geocodeAttempts++;
         if (geocodeAttempts === 1) {
           return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'OVER_QUERY_LIMIT', results: [] }) });
@@ -431,7 +498,7 @@ describe('importJobs — geocoding retry', () => {
       if (u.includes('sheets.googleapis.com')) {
         return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', '1 St']]));
       }
-      if (u.includes('maps/api/geocode')) {
+      if (u.includes('functions/v1/geocode-address')) {
         attempts++;
         if (attempts === 1) return Promise.resolve({ ok: false, status: 429, json: async () => ({}) });
         return Promise.resolve(geocodeOk());
@@ -450,7 +517,7 @@ describe('importJobs — geocoding retry', () => {
       if (u.includes('sheets.googleapis.com')) {
         return Promise.resolve(sheetsResponse([[SERIAL_TODAY, 'C', 'A', 'n', '', '', 'Nowhere']]));
       }
-      if (u.includes('maps/api/geocode')) {
+      if (u.includes('functions/v1/geocode-address')) {
         attempts++;
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'ZERO_RESULTS', results: [] }) });
       }

@@ -141,8 +141,13 @@ EXPO_PUBLIC_SUPABASE_URL=...
 EXPO_PUBLIC_SUPABASE_ANON_KEY=...
 EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS=<paste the iOS client ID>
 EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB=<paste the Desktop client ID>
-EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=<for geocoding — see AdminDashboardScreen :312>
 ```
+
+The Google **Maps** key does not belong in `.env.local` — it is a Supabase
+secret (`supabase secrets set GOOGLE_MAPS_API_KEY=…`) read by the
+`geocode-address` and `optimize-route` Edge Functions. Maps web service keys
+cannot be restricted to an app, so one bundled into the client would be
+unrestricted. See the Maps key runbook in `ELECTRON_HARDENING_HANDOVER.md`.
 
 Restart Expo after changing `.env.local` — env values are bundled at
 build time and a hot-reload will not pick them up.
