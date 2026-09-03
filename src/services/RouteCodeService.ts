@@ -21,6 +21,8 @@ type JobRow = {
   photo_gps_lat: number | null;
   photo_gps_lng: number | null;
   photo_timestamp: string | null;
+  notice_sent_at?: string | null;
+  notice_sent_by?: string | null;
 };
 
 // Shape returned by the validate_route_code() RPC (see 006_rate_limit_codes.sql).
@@ -85,6 +87,11 @@ function mapJobRow(j: JobRow): SignJob {
     photoGPSLat: j.photo_gps_lat ?? undefined,
     photoGPSLng: j.photo_gps_lng ?? undefined,
     photoTimestamp: j.photo_timestamp ? new Date(j.photo_timestamp) : undefined,
+    // Optional on the row type: validate_route_code's payload does not select
+    // these, and it should not — notice approval is admin state and the
+    // driver client has no business reading it.
+    noticeSentAt: j.notice_sent_at ? new Date(j.notice_sent_at) : undefined,
+    noticeSentBy: j.notice_sent_by ?? undefined,
   };
 }
 
@@ -261,6 +268,35 @@ export const RouteCodeService = {
     if (error) throw new Error(error.message);
 
     return ((data ?? []) as JobRow[]).map(mapJobRow);
+  },
+
+  // Admin: record that the completion notice for a job has been approved and
+  // sent. Called after the admin's mail client has been handed the message.
+  //
+  // "Sent" here means the admin approved it and their mail app was opened with
+  // the message composed — the app cannot observe whether they then pressed
+  // send, because delivery happens outside it. That limit is the trade accepted
+  // when the send method was chosen (no email provider, no domain
+  // verification); it is recorded here so nobody later reads notice_sent_at as
+  // proof of delivery. If proof is ever needed, sending must move server-side.
+  //
+  // Admin-only by construction: anon holds no UPDATE on jobs since 013, so this
+  // reaches the database solely under the "Admins can update jobs" policy.
+  async markNoticeSent(jobId: string): Promise<void> {
+    // The caller is a screen, and a screen has no business handling sessions.
+    // Resolve the admin from the session here.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not signed in — sign in again to approve notices.');
+
+    const { error } = await supabase
+      .from('jobs')
+      .update({
+        notice_sent_at: new Date().toISOString(),
+        notice_sent_by: session.user.id,
+      })
+      .eq('id', jobId);
+
+    if (error) throw new Error(error.message);
   },
 
   // Admin: fetch the codes drivers can currently use, for the dashboard.

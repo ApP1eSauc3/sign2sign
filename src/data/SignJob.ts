@@ -24,6 +24,13 @@ export interface SignJob {
   photoGPSLat?: number;
   photoGPSLng?: number;
   photoTimestamp?: Date;
+
+  // Completion-notice approval. A completed job with an agentEmail and no
+  // noticeSentAt is awaiting admin approval. Deliberately derived rather than
+  // a status column — see migration 015. The driver client can never write
+  // these: anon holds no UPDATE on jobs since 013.
+  noticeSentAt?: Date;
+  noticeSentBy?: string;
 }
 
 export interface DriverSession {

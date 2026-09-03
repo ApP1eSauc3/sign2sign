@@ -7,8 +7,6 @@ import {
   StyleSheet,
   ScrollView,
   Image,
-  Alert,
-  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -129,72 +127,13 @@ export default function DriverJobScreen({ route, navigation }: Props) {
       const success = await markComplete(jobId);
       setIsMarkingComplete(false);
       if (success) {
-        promptCompletionEmail(job!);
+        // No completion email from here. The driver never contacts the client:
+        // the notice is a claim made on Sign2Sign's behalf and an admin
+        // approves and sends it from the business account. This screen used to
+        // open a mailto: from the driver's own mail app — see migration 015.
         navigation.goBack();
       }
     }
-  }
-
-  function promptCompletionEmail(completedJob: typeof job) {
-    if (!completedJob?.agentEmail) return;
-    // agent_email originates from the Google Sheet (semi-trusted admin data).
-    // Validate strictly before putting it in a mailto: URL — a value with a
-    // '?' / '&' / CRLF could inject extra mailto headers (cc/bcc) and silently
-    // leak the completion notice to an attacker-controlled address.
-    const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-    if (!EMAIL_RE.test(completedJob.agentEmail)) {
-      Alert.alert(
-        'Agent email looks invalid',
-        'The agent email on this job is malformed, so no notice was sent. Check it in the admin route detail screen.'
-      );
-      return;
-    }
-    Alert.alert(
-      'Notify Agent?',
-      `Send a completion notice to ${completedJob.agentName ?? completedJob.agentEmail}?`,
-      [
-        { text: 'Skip', style: 'cancel' },
-        {
-          text: 'Send Email',
-          onPress: async () => {
-            const subject = encodeURIComponent(
-              `Sign ${completedJob.jobType === 'install' ? 'installed' : 'removed'} — ${completedJob.address}`
-            );
-            const body = encodeURIComponent(
-              `Hi ${completedJob.agentName ?? ''},\n\n` +
-              `This is to confirm that the sign ${completedJob.jobType === 'install' ? 'installation' : 'removal'} at:\n\n` +
-              `${completedJob.address}\n\n` +
-              `has been completed by the Sign2Sign crew.\n\n` +
-              `Client: ${completedJob.clientName}\n` +
-              `Sign: ${completedJob.signDescription}\n\n` +
-              `Regards,\nSign2Sign`
-            );
-            // The address comes from the Google Sheet, so it is not ours to
-            // trust: an unencoded `?` or `&` in that cell would inject extra
-            // mailto parameters (cc, bcc, a different body) into the URL.
-            // `@` is left literal — it is legal unencoded in a mailto and
-            // percent-encoding it trips some mail handlers.
-            const agentAddress = encodeURIComponent(completedJob.agentEmail ?? '').replace(/%40/g, '@');
-            const mailtoUrl = `mailto:${agentAddress}?subject=${subject}&body=${body}`;
-            // Drivers may have no mail account configured on the device —
-            // mailto: then fails silently and the agent never hears. Detect
-            // it and hand the driver the address instead of dropping the
-            // notice on the floor.
-            try {
-              const canOpen = await Linking.canOpenURL(mailtoUrl);
-              if (!canOpen) throw new Error('no mail handler');
-              await Linking.openURL(mailtoUrl);
-            } catch {
-              Alert.alert(
-                'No email app set up',
-                `This phone has no email account configured, so the notice was not sent. ` +
-                  `Let dispatch know, or contact the agent directly: ${completedJob.agentEmail}`
-              );
-            }
-          },
-        },
-      ]
-    );
   }
 
   const typeColor = job.jobType === 'install' ? colors.install : colors.removal;
