@@ -6,6 +6,21 @@ jest.mock('../../utils/secureStorage', () => ({
   secureStorage: { getItem: jest.fn(), setItem: jest.fn(), removeItem: jest.fn() },
 }));
 
+// utils/random wraps expo-crypto. It is mocked here for the same reason
+// secureStorage is: the native module must not load under ts-jest.
+//
+// NOTE: this file used to define a fake `crypto` global instead, with the
+// comment "Hermes and the Electron renderer both provide these globally."
+// The Electron half was true and the Hermes half was not — RN 0.83 installs
+// no `crypto` at all — so the suite asserted the assumption that caused the
+// bug, and passed on every run while driver login could not work on any
+// device. Mock the seam the code actually uses, never a global you believe
+// the runtime provides.
+jest.mock('../../utils/random', () => ({
+  randomUUID: jest.fn(() => 'generated-uuid'),
+  getRandomValues: jest.fn((buf: Uint32Array) => { buf[0] = 123456789; return buf; }),
+}));
+
 jest.mock('../supabaseClient', () => ({
   SUPABASE_URL: 'https://proj.supabase.co',
   SUPABASE_ANON_KEY: 'anon-key-123',
@@ -19,14 +34,6 @@ const mockFrom = supabase.from as unknown as jest.Mock;
 beforeEach(() => {
   global.fetch = jest.fn();
   mockGetItem.mockResolvedValue('stored-client-id');
-  // Hermes and the Electron renderer both provide these globally.
-  Object.defineProperty(globalThis, 'crypto', {
-    configurable: true,
-    value: {
-      getRandomValues: (buf: Uint32Array) => { buf[0] = 123456789; return buf; },
-      randomUUID: () => 'generated-uuid',
-    },
-  });
 });
 
 function jsonResponse(body: unknown, status = 200) {
@@ -274,11 +281,32 @@ describe('generateDailyCodes', () => {
     expect(Number(code)).toBeLessThanOrEqual(999999);
   });
 
-  it('refuses to generate when no cryptographic RNG is available', async () => {
-    installSupabase();
+  // Regression — the bug found on the first real-device build, 2026-09-03.
+  //
+  // Both of these fail against the previous implementation, which read
+  // `crypto.randomUUID` / `crypto.getRandomValues` off the global. Deleting
+  // the global here reproduces Hermes exactly: RN 0.83 installs no `crypto`,
+  // and neither does Expo 55's winter runtime.
+  it('generates a client id with no crypto global (Hermes)', async () => {
     Object.defineProperty(globalThis, 'crypto', { configurable: true, value: undefined });
-    // Math.random() is biased and predictable — fatal when the value IS the credential.
-    await expect(RouteCodeService.generateDailyCodes([1])).rejects.toThrow(/Cryptographic RNG unavailable/);
+    mockGetItem.mockResolvedValue(null);
+    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse({ session: null }));
+
+    await RouteCodeService.loadSession('123456');
+
+    // Previously threw before fetch was ever called, and the store reported
+    // it to the driver as a signal problem.
+    expect(global.fetch).toHaveBeenCalled();
+    expect(mockSetItem).toHaveBeenCalledWith('driver_client_id', 'generated-uuid');
+  });
+
+  it('generates driver codes with no crypto global (Hermes)', async () => {
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: undefined });
+    installSupabase();
+    // Never reached on the iOS admin build before this fix. It failed safe —
+    // refusing rather than falling back to Math.random(), which is biased and
+    // predictable and would have made the driver credential guessable.
+    await expect(RouteCodeService.generateDailyCodes([1])).resolves.toBeDefined();
   });
 
   it('retries only on a 23505 code collision', async () => {

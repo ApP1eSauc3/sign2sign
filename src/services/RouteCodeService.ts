@@ -1,4 +1,5 @@
 import { secureStorage } from '../utils/secureStorage';
+import { randomUUID, getRandomValues } from '../utils/random';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 import { DriverSession, DailyCode, JobType, SignJob } from '../data/SignJob';
 
@@ -34,19 +35,21 @@ const CLIENT_ID_KEY = 'driver_client_id';
 
 // Cryptographically secure 6-digit code generator. Math.random() is biased
 // and predictable across modern V8 with enough samples — fatal when the
-// generated value IS the driver credential. crypto.getRandomValues is
-// available globally in both Hermes (RN 0.76+) and the Electron renderer.
+// generated value IS the driver credential.
+//
+// This used to read the `crypto` global directly, guarded by a comment
+// claiming "available globally in both Hermes (RN 0.76+) and the Electron
+// renderer". The Electron half was true; the Hermes half was not, and RN 0.83
+// ships no `crypto` at all. Only the Electron admin build ever exercised this,
+// so the iOS admin app would have thrown here. Now via utils/random.
 function generateSixDigitCode(): string {
-  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
-    throw new Error('Cryptographic RNG unavailable — cannot generate driver codes safely.');
-  }
   // Reject values outside the largest multiple of 900000 that fits in Uint32
   // so the modulo is unbiased.
   const LIMIT = Math.floor(0xffffffff / 900000) * 900000;
   const buf = new Uint32Array(1);
   let v: number;
   do {
-    crypto.getRandomValues(buf);
+    getRandomValues(buf);
     v = buf[0];
   } while (v >= LIMIT);
   return (100000 + (v % 900000)).toString();
@@ -57,10 +60,10 @@ function generateSixDigitCode(): string {
 async function getOrCreateClientId(): Promise<string> {
   const existing = await secureStorage.getItem(CLIENT_ID_KEY);
   if (existing) return existing;
-  if (typeof crypto === 'undefined' || typeof crypto.randomUUID !== 'function') {
-    throw new Error('crypto.randomUUID unavailable — cannot create client id.');
-  }
-  const id = crypto.randomUUID();
+  // Was `crypto.randomUUID()` against the global. Hermes provides no `crypto`,
+  // so this threw on every real device before the request was ever made — see
+  // the note in utils/uuid.ts.
+  const id = randomUUID();
   await secureStorage.setItem(CLIENT_ID_KEY, id);
   return id;
 }

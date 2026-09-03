@@ -85,15 +85,23 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
 
       return true;
     } catch (err) {
-      // RouteCodeService.loadSession throws on network/server errors (not on invalid code).
-      // Surface the rate-limit message verbatim — it tells the driver how long to wait.
-      const message = err instanceof Error ? err.message : '';
-      const isRateLimited = message.startsWith('Too many attempts');
+      // RouteCodeService.loadSession throws on network/server errors (not on
+      // invalid code), and every message it throws is already driver-facing
+      // copy — its contract says to surface them verbatim. So pass the message
+      // through rather than re-deciding what went wrong here.
+      //
+      // This used to collapse everything except the rate-limit case into
+      // "Connection problem — check your signal and try again." That copy sent
+      // a driver to check their reception for a fault that had nothing to do
+      // with the network: the first real-device build failed inside
+      // getOrCreateClientId, before any request was made, and reported itself
+      // as a signal problem. A driver in a field would have power-cycled the
+      // phone. Only a genuinely unknown throw gets a generic message now.
+      const message = err instanceof Error ? err.message.trim() : '';
+      if (!message) console.error('[driver] loadSession failed with no message:', err);
       set({
         isLoadingSession: false,
-        codeError: isRateLimited
-          ? message
-          : 'Connection problem — check your signal and try again.',
+        codeError: message || 'Something went wrong loading the route. Please try again.',
       });
       return false;
     }

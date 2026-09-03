@@ -116,11 +116,36 @@ describe('loadSession — upload-state seeding', () => {
     expect(useDriverSession.getState().codeError).toBe('Too many attempts. Wait a minute and try again.');
   });
 
-  it('maps other errors to a generic connection message', async () => {
-    mockLoadSession.mockRejectedValue(new Error('socket hang up'));
+  // Was: "maps other errors to a generic connection message".
+  //
+  // That mapping is what turned the 2026-09-03 device failure into an hour of
+  // looking at the network. RouteCodeService's contract says its messages are
+  // driver-facing and should be surfaced verbatim; the store now does that.
+  it('surfaces the service message verbatim rather than guessing at a cause', async () => {
+    mockLoadSession.mockRejectedValue(
+      new Error('Could not reach the server. Check your connection and try again.')
+    );
     await useDriverSession.getState().loadSession('123456');
     expect(useDriverSession.getState().codeError).toBe(
-      'Connection problem — check your signal and try again.'
+      'Could not reach the server. Check your connection and try again.'
+    );
+  });
+
+  it('does not blame the network for a fault that never reached it', async () => {
+    // The shape of the real bug: a throw from getOrCreateClientId, before any
+    // request. Previously reported to the driver as a signal problem.
+    mockLoadSession.mockRejectedValue(new Error('Something failed on this device.'));
+    await useDriverSession.getState().loadSession('123456');
+    const shown = useDriverSession.getState().codeError ?? '';
+    expect(shown).toBe('Something failed on this device.');
+    expect(shown).not.toMatch(/signal/i);
+  });
+
+  it('falls back to a generic message only when the throw carries none', async () => {
+    mockLoadSession.mockRejectedValue(new Error(''));
+    await useDriverSession.getState().loadSession('123456');
+    expect(useDriverSession.getState().codeError).toBe(
+      'Something went wrong loading the route. Please try again.'
     );
   });
 
