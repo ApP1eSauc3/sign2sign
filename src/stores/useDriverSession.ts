@@ -2,8 +2,9 @@ import { create } from 'zustand';
 import { DriverSession, SignJob, JobUploadState } from '../data/SignJob';
 import { RouteCodeService } from '../services/RouteCodeService';
 import { JobPhotoService, PhotoLocation } from '../services/JobPhotoService';
-import { jobWriteErrorCode } from '../data/JobWriteError';
 import { OfflineQueueService } from '../services/OfflineQueueService';
+import { seedUploadStates, patchSessionJob } from './driverSession/sessionJobs';
+import { createFlushHandlers } from './driverSession/offlineFlush';
 
 interface DriverSessionStore {
   session: DriverSession | null;
@@ -67,17 +68,7 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
         return false;
       }
 
-      // Seed upload states: jobs already completed get 'succeeded', others get 'idle'
-      const uploadStates: Record<string, JobUploadState> = {};
-      for (const job of session.jobs) {
-        if (job.isComplete && job.photoKey) {
-          uploadStates[job.id] = { status: 'succeeded', photoKey: job.photoKey };
-        } else {
-          uploadStates[job.id] = { status: 'idle' };
-        }
-      }
-
-      set({ session, uploadStates });
+      set({ session, uploadStates: seedUploadStates(session.jobs) });
 
       // Flush any operations queued during a previous offline session.
       // Runs in the background — don't block the session load.
@@ -179,25 +170,18 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
       setUploadState(jobId, { status: 'succeeded', photoKey: result.photoKey });
 
       // Update local session state with photo data
-      set((s) => {
-        if (!s.session) return s;
-        return {
-          session: {
-            ...s.session,
-            jobs: s.session.jobs.map((j) =>
-              j.id === jobId
-                ? {
-                    ...j,
-                    photoKey: result.photoKey,
-                    photoGPSLat: result.latitude,
-                    photoGPSLng: result.longitude,
-                    photoTimestamp: result.timestamp,
-                  }
-                : j
-            ),
-          },
-        };
-      });
+      set((s) =>
+        s.session
+          ? {
+              session: patchSessionJob(s.session, jobId, {
+                photoKey: result.photoKey,
+                photoGPSLat: result.latitude,
+                photoGPSLng: result.longitude,
+                photoTimestamp: result.timestamp,
+              }),
+            }
+          : s
+      );
     } catch (err: unknown) {
       setUploadState(jobId, {
         status: 'failed',
@@ -247,33 +231,17 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
           routeCode
         );
         // Optimistically mark complete locally — will sync when online
-        set((s) => {
-          if (!s.session) return s;
-          return {
-            session: {
-              ...s.session,
-              jobs: s.session.jobs.map((j) =>
-                j.id === jobId ? { ...j, isComplete: true } : j
-              ),
-            },
-          };
-        });
+        set((s) =>
+          s.session ? { session: patchSessionJob(s.session, jobId, { isComplete: true }) } : s
+        );
         return true; // queued counts as success from the driver's perspective
       }
 
       await JobPhotoService.markJobComplete(jobId, routeCode);
 
-      set((s) => {
-        if (!s.session) return s;
-        return {
-          session: {
-            ...s.session,
-            jobs: s.session.jobs.map((j) =>
-              j.id === jobId ? { ...j, isComplete: true } : j
-            ),
-          },
-        };
-      });
+      set((s) =>
+        s.session ? { session: patchSessionJob(s.session, jobId, { isComplete: true }) } : s
+      );
       return true;
     } catch (err: unknown) {
       // Keep uploadState as 'succeeded' — photo is still uploaded, only the DB write failed.
@@ -291,50 +259,13 @@ export const useDriverSession = create<DriverSessionStore>((set, get) => ({
   // --- Offline queue ---
 
   flushOfflineQueue: async () => {
-    const { setUploadState } = get();
-    await OfflineQueueService.flush({
-      onUpload: async (op, routeCode) => {
-        setUploadState(op.jobId, { status: 'uploading' });
-        try {
-          const result = await JobPhotoService.uploadPhoto(op.jobId, op.imageUri, op.location, routeCode);
-          setUploadState(op.jobId, { status: 'succeeded', photoKey: result.photoKey });
-        } catch (err: unknown) {
-          // Let the queue service know this op failed (it re-queues for next flush).
-          // Reset upload state so the driver sees a retry prompt instead of a stuck spinner.
-          setUploadState(op.jobId, {
-            status: 'failed',
-            message: err instanceof Error ? err.message : 'Upload failed. Try again.',
-          });
-          throw err; // propagate so OfflineQueueService.flush records this as failed
-        }
-      },
-      onMarkComplete: async (op, routeCode) => {
-        try {
-          await JobPhotoService.markJobComplete(op.jobId, routeCode);
-        } catch (err: unknown) {
-          // A queued mark-complete was previously shown to the driver as an
-          // optimistic success — a silent flush failure here means the admin
-          // never learns the job was done. Surface it so the job screen shows
-          // a retryable error instead of nothing.
-          // Branch on the RPC's error CODE, not on its message. The same code
-          // means different things in different contexts: an invalid code during
-          // a live mark-complete is "retry", but during an offline-queue flush
-          // it means this finished work may never reach the admin at all — so
-          // the wording here is deliberately not the service's default.
-          const code = jobWriteErrorCode(err);
-          set((s) => ({
-            markCompleteErrors: {
-              ...s.markCompleteErrors,
-              [op.jobId]:
-                code === 'invalid_route_code'
-                  ? 'Could not sync this completed job — the route code is no longer valid. Tell dispatch which jobs you finished so they can record them.'
-                  : 'Could not sync this completed job. It will retry next time you go online.',
-            },
-          }));
-          throw err; // keep the op queued for the next flush
-        }
-      },
-    });
+    await OfflineQueueService.flush(
+      createFlushHandlers({
+        setUploadState: get().setUploadState,
+        setMarkCompleteError: (jobId, message) =>
+          set((s) => ({ markCompleteErrors: { ...s.markCompleteErrors, [jobId]: message } })),
+      })
+    );
   },
 
   // --- Helpers ---
