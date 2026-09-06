@@ -1,29 +1,13 @@
 import { secureStorage } from '../utils/secureStorage';
-import { randomUUID, getRandomValues } from '../utils/random';
+import { randomUUID } from '../utils/random';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
-import { DriverSession, DailyCode, JobType, SignJob } from '../data/SignJob';
-
-// DB row shapes — map snake_case DB columns to camelCase domain types at the boundary.
-// These types live here, not in src/data/, because they are a DB implementation detail.
-type JobRow = {
-  id: string;
-  client_name: string;
-  agent_name: string | null;
-  agent_email: string | null;
-  address: string;
-  sign_description: string;
-  job_type: string;
-  latitude: number;
-  longitude: number;
-  sort_order: number;
-  is_complete: boolean;
-  photo_key: string | null;
-  photo_gps_lat: number | null;
-  photo_gps_lng: number | null;
-  photo_timestamp: string | null;
-  notice_sent_at?: string | null;
-  notice_sent_by?: string | null;
-};
+import { DriverSession, DailyCode, SignJob } from '../data/SignJob';
+import { JobRow, mapJobRow } from './routeCode/jobRow';
+import {
+  generateSixDigitCode,
+  localDateString,
+  expiryNextMorning,
+} from './routeCode/codeFactory';
 
 // Shape returned by the validate_route_code() RPC (see 006_rate_limit_codes.sql).
 type ValidateRouteCodePayload = {
@@ -34,28 +18,6 @@ type ValidateRouteCodePayload = {
 };
 
 const CLIENT_ID_KEY = 'driver_client_id';
-
-// Cryptographically secure 6-digit code generator. Math.random() is biased
-// and predictable across modern V8 with enough samples — fatal when the
-// generated value IS the driver credential.
-//
-// This used to read the `crypto` global directly, guarded by a comment
-// claiming "available globally in both Hermes (RN 0.76+) and the Electron
-// renderer". The Electron half was true; the Hermes half was not, and RN 0.83
-// ships no `crypto` at all. Only the Electron admin build ever exercised this,
-// so the iOS admin app would have thrown here. Now via utils/random.
-function generateSixDigitCode(): string {
-  // Reject values outside the largest multiple of 900000 that fits in Uint32
-  // so the modulo is unbiased.
-  const LIMIT = Math.floor(0xffffffff / 900000) * 900000;
-  const buf = new Uint32Array(1);
-  let v: number;
-  do {
-    getRandomValues(buf);
-    v = buf[0];
-  } while (v >= LIMIT);
-  return (100000 + (v % 900000)).toString();
-}
 
 // Stable per-install identifier used to rate-limit code validation attempts
 // in the RPC. Persisted in the device keychain — does not leak across reinstalls.
@@ -68,55 +30,6 @@ async function getOrCreateClientId(): Promise<string> {
   const id = randomUUID();
   await secureStorage.setItem(CLIENT_ID_KEY, id);
   return id;
-}
-
-function mapJobRow(j: JobRow): SignJob {
-  return {
-    id: j.id,
-    clientName: j.client_name,
-    agentName: j.agent_name ?? '',
-    agentEmail: j.agent_email ?? '',
-    address: j.address,
-    signDescription: j.sign_description,
-    jobType: (j.job_type === 'removal' ? 'removal' : 'install') as JobType,
-    latitude: j.latitude,
-    longitude: j.longitude,
-    sortOrder: j.sort_order,
-    isComplete: j.is_complete,
-    photoKey: j.photo_key ?? undefined,
-    photoGPSLat: j.photo_gps_lat ?? undefined,
-    photoGPSLng: j.photo_gps_lng ?? undefined,
-    photoTimestamp: j.photo_timestamp ? new Date(j.photo_timestamp) : undefined,
-    // Optional on the row type: validate_route_code's payload does not select
-    // these, and it should not — notice approval is admin state and the
-    // driver client has no business reading it.
-    noticeSentAt: j.notice_sent_at ? new Date(j.notice_sent_at) : undefined,
-    noticeSentBy: j.notice_sent_by ?? undefined,
-  };
-}
-
-// Local calendar date as YYYY-MM-DD. NEVER use toISOString().split('T')[0]
-// here — that is the UTC date, and Perth is UTC+8: codes generated before
-// 08:00 local would be stamped with *yesterday's* date, vanish from the
-// dashboard at 08:00, and dodge the regeneration deactivation filter
-// (leaving two live codes per slot). created_date is a local business-day
-// label; expiry and validation always use the absolute expires_at instant.
-function localDateString(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
-function expiryNextMorning(): string {
-  // Expire at 06:00 the following morning rather than 23:59 tonight.
-  // Drivers finishing late jobs or working past midnight are not locked out
-  // mid-shift. The code is still single-day — it expires before the next
-  // morning's batch is generated.
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(6, 0, 0, 0);
-  return d.toISOString();
 }
 
 export const RouteCodeService = {
