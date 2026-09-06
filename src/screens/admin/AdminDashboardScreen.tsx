@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -19,16 +17,13 @@ import { GoogleSheetsService } from '../../services/GoogleSheetsService';
 import { useAppStore } from '../../stores/useAppStore';
 import { AppMode, DailyCode } from '../../data/SignJob';
 import { GoogleAuthService } from '../../services/GoogleAuthService';
-import { colors } from '../../utils/colors';
-import { AdminCard } from '../components/AdminCard';
-import { TextInputField } from '../components/TextInputField';
-import { PrimaryButton } from '../components/PrimaryButton';
-import { EmptyState } from '../components/EmptyState';
+import { styles } from './dashboard/styles';
+import { parseImportDate } from './dashboard/importDate.logic';
+import { DriverCodesSection } from './dashboard/DriverCodesSection';
+import { JobImportSection } from './dashboard/JobImportSection';
+import { ActiveRoutesList } from './dashboard/ActiveRoutesList';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'AdminDashboard'>;
-
-const MIN_DRIVERS = 1;
-const MAX_DRIVERS = 8;
 
 export default function AdminDashboardScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -123,26 +118,12 @@ export default function AdminDashboardScreen({ navigation }: Props) {
       return;
     }
 
-    // Validate YYYY-MM-DD strictly. Without this, "2026-13-40" rolls over to
-    // a valid Date object that silently matches zero rows and the user just
-    // sees "No jobs found" with no hint that the date itself was malformed.
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(importDate);
-    if (!match) {
-      Alert.alert('Invalid date', 'Use the format YYYY-MM-DD (e.g. 2026-05-17).');
+    const parsed = parseImportDate(importDate);
+    if (!parsed.ok) {
+      Alert.alert(parsed.title, parsed.message);
       return;
     }
-    const y = Number(match[1]);
-    const m = Number(match[2]);
-    const d = Number(match[3]);
-    const dateObj = new Date(y, m - 1, d);
-    if (
-      dateObj.getFullYear() !== y ||
-      dateObj.getMonth() !== m - 1 ||
-      dateObj.getDate() !== d
-    ) {
-      Alert.alert('Invalid date', 'That date does not exist — check month and day.');
-      return;
-    }
+    const dateObj = parsed.date;
 
     setIsImporting(true);
     setImportResult(null);
@@ -200,447 +181,45 @@ export default function AdminDashboardScreen({ navigation }: Props) {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ── Today's Codes ───────────────────────────────────────────── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>TODAY'S CODES</Text>
-          <TouchableOpacity
-            style={[styles.sectionAction, isGenerating && styles.sectionActionDisabled]}
-            onPress={handleGenerateCodes}
-            disabled={isGenerating}
-          >
-            {isGenerating
-              ? <ActivityIndicator size="small" color={colors.brand} />
-              : <Text style={styles.sectionActionText}>Generate</Text>
-            }
-          </TouchableOpacity>
-        </View>
+        <DriverCodesSection
+          driverCount={driverCount}
+          setDriverCount={setDriverCount}
+          codes={codes}
+          isLoadingCodes={isLoadingCodes}
+          loadCodesError={loadCodesError}
+          isGenerating={isGenerating}
+          onGenerate={handleGenerateCodes}
+          selectedRouteCodeId={selectedRouteCodeId}
+          onSelect={setSelectedRouteCodeId}
+        />
 
-        {/* Driver count stepper */}
-        <AdminCard style={styles.stepperRow}>
-          <Text style={styles.stepperLabel}>Drivers</Text>
-          <View style={styles.stepper}>
-            <TouchableOpacity
-              style={[styles.stepperButton, driverCount <= MIN_DRIVERS && styles.stepperButtonDisabled]}
-              onPress={() => setDriverCount((n) => Math.max(MIN_DRIVERS, n - 1))}
-              disabled={driverCount <= MIN_DRIVERS}
-              accessibilityRole="button"
-              accessibilityLabel="Decrease driver count"
-              accessibilityState={{ disabled: driverCount <= MIN_DRIVERS }}
-            >
-              <Text style={styles.stepperButtonText} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">−</Text>
-            </TouchableOpacity>
-            <Text
-              style={styles.stepperValue}
-              accessibilityLiveRegion="polite"
-              accessibilityLabel={`${driverCount} drivers`}
-            >{driverCount}</Text>
-            <TouchableOpacity
-              style={[styles.stepperButton, driverCount >= MAX_DRIVERS && styles.stepperButtonDisabled]}
-              onPress={() => setDriverCount((n) => Math.min(MAX_DRIVERS, n + 1))}
-              disabled={driverCount >= MAX_DRIVERS}
-              accessibilityRole="button"
-              accessibilityLabel="Increase driver count"
-              accessibilityState={{ disabled: driverCount >= MAX_DRIVERS }}
-            >
-              <Text style={styles.stepperButtonText} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">+</Text>
-            </TouchableOpacity>
-          </View>
-        </AdminCard>
+        <JobImportSection
+          sheetId={sheetId}
+          setSheetId={setSheetId}
+          sheetName={sheetName}
+          setSheetName={setSheetName}
+          importDate={importDate}
+          setImportDate={setImportDate}
+          codes={codes}
+          selectedRouteCodeId={selectedRouteCodeId}
+          importResult={importResult}
+          isImporting={isImporting}
+          isGoogleConnected={isGoogleConnected}
+          onConnectGoogle={() => navigation.navigate('GoogleConnect')}
+          onImport={handleImportJobs}
+        />
 
-        {isLoadingCodes ? (
-          <AdminCard>
-            <ActivityIndicator color={colors.brand} />
-          </AdminCard>
-        ) : loadCodesError ? (
-          <AdminCard>
-            <Text style={[styles.emptyText, { color: colors.adminError }]}>{loadCodesError}</Text>
-            <Text style={styles.emptyHint}>Check your connection and pull to refresh.</Text>
-          </AdminCard>
-        ) : codes.length === 0 ? (
-          <AdminCard>
-            <EmptyState
-              variant="admin"
-              title="No codes generated yet today."
-              hint="Tap Generate to create driver codes."
-            />
-          </AdminCard>
-        ) : (
-          <View style={styles.codesGrid}>
-            {codes.map((c) => (
-              <TouchableOpacity
-                key={c.id}
-                onPress={() =>
-                  setSelectedRouteCodeId(selectedRouteCodeId === c.id ? null : c.id)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`Driver ${c.driverSlot}, code ${c.code.split('').join(' ')}`}
-                accessibilityState={{ selected: selectedRouteCodeId === c.id }}
-                accessibilityHint="Selects this driver to receive imported jobs"
-                style={styles.codeCardWrap}
-              >
-                <AdminCard selected={selectedRouteCodeId === c.id}>
-                  <Text style={styles.codeSlot}>DRIVER {c.driverSlot}</Text>
-                  <Text style={styles.codeValue}>{c.code}</Text>
-                  {selectedRouteCodeId === c.id && (
-                    <Text style={styles.codeSelectedLabel}>Selected for import</Text>
-                  )}
-                </AdminCard>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* ── Job Import ──────────────────────────────────────────────── */}
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionLabel, { marginTop: 28, marginBottom: 0 }]}>JOB IMPORT</Text>
-          <TouchableOpacity
-            style={[styles.sectionAction, { marginTop: 28 }, isGoogleConnected && styles.sectionActionConnected]}
-            onPress={() => navigation.navigate('GoogleConnect')}
-          >
-            <Text style={[styles.sectionActionText, isGoogleConnected && { color: colors.adminSuccess }]}>
-              {isGoogleConnected ? '✓ Google Connected' : 'Connect Google'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <AdminCard style={{ marginTop: 10 }}>
-          <TextInputField
-            variant="compact"
-            label="Google Sheet ID"
-            value={sheetId}
-            onChangeText={setSheetId}
-            placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TextInputField
-            variant="compact"
-            label="Sheet Tab Name"
-            value={sheetName}
-            onChangeText={setSheetName}
-            placeholder="Sheet44"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TextInputField
-            variant="compact"
-            label="Import Date"
-            value={importDate}
-            onChangeText={setImportDate}
-            placeholder="YYYY-MM-DD"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="numeric"
-          />
-          <View style={styles.sheetFormatCard}>
-            <Text style={styles.sheetFormatTitle}>EXPECTED COLUMN ORDER (row 2 onwards)</Text>
-            <Text style={styles.sheetFormatRow}>A  Date</Text>
-            <Text style={styles.sheetFormatRow}>B  Agency  <Text style={styles.sheetFormatHint}>(client name)</Text></Text>
-            <Text style={styles.sheetFormatRow}>C  Agent  <Text style={styles.sheetFormatHint}>(name)</Text></Text>
-            <Text style={styles.sheetFormatRow}>D  Notes  <Text style={styles.sheetFormatHint}>(install instructions, optional)</Text></Text>
-            <Text style={styles.sheetFormatRow}>E  Size  <Text style={styles.sheetFormatHint}>(6x4, 4x3, etc., optional)</Text></Text>
-            <Text style={styles.sheetFormatRow}>F  Printed  <Text style={styles.sheetFormatHint}>(skipped)</Text></Text>
-            <Text style={styles.sheetFormatRow}>G  Address  <Text style={styles.sheetFormatHint}>(required — geocoded on import)</Text></Text>
-            <Text style={styles.sheetFormatNote}>
-              Only rows matching the import date are imported. Addresses are geocoded automatically. Agent email is left blank; add it via the route detail screen before sending completion emails.
-            </Text>
-          </View>
-
-          {selectedRouteCodeId ? (
-            <Text style={styles.assignNote}>
-              Assigning to Driver{' '}
-              {codes.find((c) => c.id === selectedRouteCodeId)?.driverSlot} —{' '}
-              {codes.find((c) => c.id === selectedRouteCodeId)?.code}
-            </Text>
-          ) : (
-            <Text style={styles.assignHint}>
-              Select a driver code above to assign imported jobs.
-            </Text>
-          )}
-
-          {importResult && (
-            <Text
-              style={[
-                styles.importResult,
-                importResult.startsWith('✓')
-                  ? styles.importResultSuccess
-                  : styles.importResultError,
-              ]}
-            >
-              {importResult}
-            </Text>
-          )}
-
-          <PrimaryButton
-            label="Import Jobs from Sheet"
-            size="admin"
-            loading={isImporting}
-            disabled={!sheetId.trim() || !sheetName.trim() || !selectedRouteCodeId}
-            onPress={handleImportJobs}
-          />
-        </AdminCard>
-
-        {/* ── Active Routes ───────────────────────────────────────────── */}
-        <Text style={[styles.sectionLabel, { marginTop: 28 }]}>ACTIVE ROUTES</Text>
-        <AdminCard>
-          {codes.length === 0 ? (
-            <Text style={styles.emptyText}>No active routes today.</Text>
-          ) : (
-            codes.map((c, i) => (
-              <TouchableOpacity
-                key={c.id}
-                style={[
-                  styles.routeRow,
-                  i < codes.length - 1 && styles.routeRowBorder,
-                ]}
-                onPress={() =>
-                  navigation.navigate('AdminRouteDetail', {
-                    routeCodeId: c.id,
-                    driverSlot: c.driverSlot,
-                    code: c.code,
-                  })
-                }
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={`Open route detail for Driver ${c.driverSlot}, code ${c.code.split('').join(' ')}, active`}
-              >
-                <View style={styles.routeSlotDot} />
-                <View style={styles.routeRowContent}>
-                  <Text style={styles.routeSlotLabel}>Driver {c.driverSlot}</Text>
-                  <Text style={styles.routeCode}>{c.code}</Text>
-                </View>
-                <View style={styles.routeRowRight}>
-                  <View style={styles.routeActiveBadge}>
-                    <Text style={styles.routeActiveBadgeText}>ACTIVE</Text>
-                  </View>
-                  <Text style={styles.routeChevron} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">›</Text>
-                </View>
-              </TouchableOpacity>
-            ))
-          )}
-        </AdminCard>
+        <ActiveRoutesList
+          codes={codes}
+          onOpenRoute={(c) =>
+            navigation.navigate('AdminRouteDetail', {
+              routeCodeId: c.id,
+              driverSlot: c.driverSlot,
+              code: c.code,
+            })
+          }
+        />
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.white },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    backgroundColor: colors.white,
-  },
-  headerTitle: { fontSize: 22, fontWeight: '700', color: colors.adminText },
-  headerSub: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.brand,
-    letterSpacing: 1.5,
-    marginTop: 1,
-  },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  signOutButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.adminBorder,
-  },
-  signOutText: { fontSize: 14, fontWeight: '600', color: colors.adminTextSecondary },
-
-  divider: { height: 1, backgroundColor: colors.adminDivider },
-
-  scroll: { flex: 1 },
-  content: { paddingHorizontal: 16, paddingTop: 24 },  // DESIGN §2.4 — standard page margin
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.adminTextTertiary,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  sectionAction: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.brand,
-  },
-  sectionActionDisabled: { opacity: 0.4 },
-  sectionActionConnected: { borderColor: colors.adminSuccess, backgroundColor: colors.adminSuccessBg },
-  sectionActionText: { fontSize: 13, fontWeight: '600', color: colors.brand },
-
-  emptyText: { fontSize: 15, color: colors.adminTextTertiary },
-  emptyHint: { fontSize: 13, color: colors.adminTextHint, marginTop: 4 },
-
-  // Codes grid
-  codesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  codeCardWrap: {
-    minWidth: '47%',
-    flex: 1,
-  },
-  codeSlot: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.adminTextTertiary,
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  codeValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.adminText,
-    letterSpacing: 4,
-    fontVariant: ['tabular-nums'],
-  },
-  codeSelectedLabel: {
-    fontSize: 11,
-    color: colors.brand,
-    fontWeight: '600',
-    marginTop: 6,
-  },
-
-  // Sheet format reference
-  sheetFormatCard: {
-    backgroundColor: colors.adminDivider,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    gap: 3,
-  },
-  sheetFormatTitle: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.adminTextTertiary,
-    letterSpacing: 0.8,
-    marginBottom: 6,
-  },
-  sheetFormatRow: {
-    fontSize: 12,
-    color: colors.adminTextSecondary,
-    fontVariant: ['tabular-nums'],
-  },
-  sheetFormatHint: {
-    color: colors.adminTextHint,
-    fontStyle: 'italic',
-  },
-  sheetFormatNote: {
-    fontSize: 11,
-    color: colors.adminTextHint,
-    marginTop: 8,
-    lineHeight: 16,
-  },
-
-  assignNote: { fontSize: 13, color: colors.brand, fontWeight: '600', marginBottom: 12 },
-  assignHint: { fontSize: 13, color: colors.adminTextHint, marginBottom: 12 },
-  importResult: { fontSize: 14, fontWeight: '500', marginBottom: 12 },
-  importResultSuccess: { color: colors.adminSuccess },
-  importResultError: { color: colors.adminError },
-
-  // Driver count stepper
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,   // overrides AdminCard's uniform padding — matches original paddingHorizontal:16/paddingVertical:12
-    marginBottom: 10,
-  },
-  stepperLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.adminTextSecondary,
-  },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  stepperButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.adminBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperButtonDisabled: { opacity: 0.3 },
-  stepperButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.adminText,
-    lineHeight: 22,
-  },
-  stepperValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.adminText,
-    minWidth: 20,
-    textAlign: 'center',
-    fontVariant: ['tabular-nums'],
-  },
-
-  // Routes list
-  routeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  routeRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.adminDivider },
-  routeSlotDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.statusComplete,
-    marginRight: 12,
-  },
-  routeRowContent: { flex: 1 },
-  routeSlotLabel: { fontSize: 14, fontWeight: '600', color: colors.adminText },
-  routeCode: {
-    fontSize: 13,
-    color: colors.adminTextTertiary,
-    letterSpacing: 2,
-    fontVariant: ['tabular-nums'],
-  },
-  routeRowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  routeActiveBadge: {
-    backgroundColor: colors.statusCompleteBg,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  routeActiveBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.statusComplete,
-    letterSpacing: 0.8,
-  },
-  routeChevron: {
-    fontSize: 18,
-    color: colors.adminTextTertiary,
-    fontWeight: '400',
-  },
-});
