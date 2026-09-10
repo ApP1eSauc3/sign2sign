@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TouchableOpacity,
   Alert,
   ScrollView,
@@ -15,10 +14,12 @@ import { AdminStackParamList } from '../../navigation/AdminStack';
 import { AuthService } from '../../services/AuthService';
 import { useAppStore } from '../../stores/useAppStore';
 import { AppMode } from '../../data/SignJob';
-import { colors } from '../../utils/colors';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { AdminCard } from '../components/AdminCard';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { TextInputField } from '../components/TextInputField';
+import { isLikelyEmail } from '../../utils/email';
+import { styles } from './account/styles';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'Account'>;
 
@@ -36,11 +37,48 @@ export default function AccountScreen({ navigation }: Props) {
   const [confirmArmed, setConfirmArmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [isInviting, setIsInviting] = useState(false);
+
   useEffect(() => {
     AuthService.getSession().then((session) => {
       setEmail(session?.user.email ?? null);
     });
   }, []);
+
+  async function handleInvite() {
+    if (isInviting) return;
+    setInviteError(null);
+    setInviteNotice(null);
+
+    const target = inviteEmail.trim();
+    if (!isLikelyEmail(target)) {
+      setInviteError('Enter a valid email address.');
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
+
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);  // DESIGN §4 — primary CTA
+    setIsInviting(true);
+    const err = await AuthService.inviteAdmin(target);
+    setIsInviting(false);
+
+    if (err) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setInviteError(err.message);
+      return;
+    }
+
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setInviteEmail('');
+    setInviteNotice(
+      `Invite sent to ${target}. They finish setting up by tapping ` +
+      '"I have an invite code" on the login screen and entering the 6-digit ' +
+      'code from their email.'
+    );
+  }
 
   async function handleArm() {
     if (isDeleting) return;
@@ -97,6 +135,43 @@ export default function AccountScreen({ navigation }: Props) {
           </TouchableOpacity>
         </AdminCard>
 
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>ADMINS</Text>
+        <AdminCard>
+          <Text style={styles.inviteTitle}>Invite an admin</Text>
+          <Text style={styles.inviteBody}>
+            Public sign-up is disabled, so this is the only way to add
+            another admin. They get an email with a 6-digit code and choose
+            their own password — you never see or set it.
+          </Text>
+
+          <TextInputField
+            label="Their email"
+            placeholder="colleague@sign2site.com.au"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            returnKeyType="go"
+            onSubmitEditing={handleInvite}
+            textContentType="emailAddress"
+            autoComplete="email"
+            accessibilityLabel="Email address to invite"
+            value={inviteEmail}
+            onChangeText={setInviteEmail}
+            error={inviteError ?? undefined}
+          />
+
+          {inviteNotice && <Text style={styles.inviteNotice}>{inviteNotice}</Text>}
+
+          <PrimaryButton
+            label="Send invite"
+            size="admin"
+            disabled={isInviting}
+            loading={isInviting}
+            onPress={handleInvite}
+            style={{ marginTop: 4 }}
+          />
+        </AdminCard>
+
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>DANGER ZONE</Text>
         <AdminCard style={styles.dangerCard}>
           <Text style={styles.dangerTitle}>Delete account</Text>
@@ -114,9 +189,9 @@ export default function AccountScreen({ navigation }: Props) {
           </Text>
           <Text style={styles.dangerBody}>
             If you are the only admin, deleting this account locks
-            everyone out of the dashboard — new admin sign-up is
-            disabled, and a replacement account can only be created by
-            the system operator. Check with your team first.
+            everyone out of the dashboard — public sign-up is disabled, so
+            no replacement can be created from the login screen. Invite a
+            second admin above first, and check with your team.
           </Text>
 
           {!confirmArmed ? (
@@ -159,59 +234,3 @@ export default function AccountScreen({ navigation }: Props) {
     </View>
   );
 }
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.white },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,  // DESIGN §1.3 — standard page margin
-    paddingVertical: 12,
-  },
-  scroll: { flex: 1 },
-  content: { paddingHorizontal: 16, paddingTop: 24 },  // DESIGN §1.3
-
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.adminTextTertiary,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  emailValue: { fontSize: 16, fontWeight: '600', color: colors.adminText },
-
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 32,
-  },
-  linkLabel: { fontSize: 15, color: colors.adminText, fontWeight: '500' },
-  linkChevron: { fontSize: 18, color: colors.adminTextTertiary, fontWeight: '400' },
-
-  dangerCard: { borderColor: colors.adminError, backgroundColor: colors.white },
-  dangerTitle: {
-    fontSize: 17,  // DESIGN §1.7 — row primary
-    fontWeight: '700',
-    color: colors.adminError,
-    marginBottom: 8,
-  },
-  dangerBody: {
-    fontSize: 14,
-    color: colors.adminTextSecondary,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-
-  confirmHint: {
-    fontSize: 13,
-    color: colors.adminTextSecondary,
-    marginBottom: 12,
-  },
-  confirmRow: { flexDirection: 'row', gap: 12 },
-});

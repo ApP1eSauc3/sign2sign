@@ -108,6 +108,31 @@ export default function AdminLoginScreen({ navigation }: Props) {
           style={styles.button}
         />
 
+        {/* Secondary paths, below the single CTA so neither competes with it.
+            Both land on the same screen — it is one form once the code is in
+            hand — and differ only in which GoTrue token the code is verified
+            against. The email already typed is carried across so it is not
+            re-typed. */}
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={() => navigation.navigate('SetPassword', { flow: 'recovery', email: email.trim() })}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel="Forgot your password"
+        >
+          <Text style={styles.linkText}>Forgot your password?</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={() => navigation.navigate('SetPassword', { flow: 'invite', email: email.trim() })}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel="I have an invite code"
+        >
+          <Text style={styles.linkText}>I have an invite code</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => setMode(AppMode.Undecided)}
@@ -179,6 +204,18 @@ const styles = StyleSheet.create({
   // CTA — brand blue fills entirely, white text
   button: {
     marginTop: 4,
+  },
+
+  // Secondary text links — brand blue signals tappable without becoming a
+  // second CTA (no fill, so the single-advancing-action rule still holds).
+  linkButton: {
+    alignSelf: 'center',
+    marginTop: 20,
+  },
+  linkText: {
+    color: colors.brandDeep,  // 6.5:1 on white — outdoor-legible, unlike colors.brand
+    fontSize: 15,
+    fontWeight: '600',
   },
 
   // Back
