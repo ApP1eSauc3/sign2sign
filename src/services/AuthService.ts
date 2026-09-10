@@ -27,17 +27,91 @@ export const AuthService = {
     return data.session;
   },
 
-  // Calls the delete-admin-account Edge Function, which validates the bearer
-  // JWT and removes the row from auth.users via the service role. On success,
-  // clears the local session — supabase.auth.signOut() would 401 against the
-  // now-deleted user, so we drop the session directly instead.
-  async deleteAccount(): Promise<AuthError | null> {
+  // Asks GoTrue to email a recovery token. Public sign-up is disabled, so this
+  // is the only self-serve recovery path an admin has; before it existed,
+  // getting back in required Supabase dashboard access (open-work #29).
+  //
+  // ALWAYS resolves null, even when GoTrue refuses. Three different failures —
+  // "no such user", the per-address 429 ("you can only request this after N
+  // seconds"), and SMTP trouble — each identify a registered address to anyone
+  // who can read the response, which turns this form into the membership
+  // oracle that signIn was deliberately written to close. The caller shows one
+  // neutral "if that address has an account…" message on every outcome.
+  //
+  // The cost of that choice: a genuinely offline admin sees the same reassuring
+  // message and waits for a code that was never sent. Accepted — retrying is
+  // cheap, and the console line below is the trail for anyone debugging it.
+  //
+  // No `redirectTo` is passed. The reset is completed in-app with the six-digit
+  // {{ .Token }} from the email, never by following the link, so there is no
+  // redirect URL to allowlist and no deep-link handler to maintain.
+  async requestPasswordReset(email: string): Promise<void> {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+    if (error) console.warn('[auth] password reset request failed:', error.message);
+  },
+
+  // Second half of both email-code flows: exchange the six-digit code for a
+  // session, then set the password on it.
+  //
+  // `type` selects which flow. They are the same two API calls in the same
+  // order, and differ only in which GoTrue token table the code came from:
+  //   'recovery' — a "forgot password" code, for an existing account.
+  //   'invite'   — a first-time code from invite-admin, for an account that
+  //                exists with no password yet.
+  //
+  // On success the caller is left holding a live session — verifyOtp issues
+  // one — so the screen can go straight to the dashboard rather than bouncing
+  // through the login form with credentials the user just typed.
+  async completePasswordReset(params: {
+    email: string;
+    code: string;
+    newPassword: string;
+    type: 'recovery' | 'invite';
+  }): Promise<AuthError | null> {
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      email: params.email.trim().toLowerCase(),
+      token: params.code.trim(),
+      type: params.type,
+    });
+    if (verifyError) {
+      // Already generic — GoTrue does not distinguish "wrong code" from
+      // "no such code" here, so this leaks nothing and needs no flattening.
+      console.warn('[auth] code verification failed:', verifyError.message);
+      return { message: 'That code is invalid or has expired. Request a new one.' };
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: params.newPassword });
+    if (updateError) {
+      // verifyOtp already minted a session. Leaving it in place would hand the
+      // user a signed-in app whose password is still the old one — or, on the
+      // invite path, an account with no password at all that can never be
+      // signed into again. Drop it so the only way forward is a fresh code.
+      await supabase.auth.signOut().catch(() => { /* best effort */ });
+      console.warn('[auth] password update failed:', updateError.message);
+      // Passed through, not flattened: these are validation messages about the
+      // password the user just chose ("should be at least 6 characters"), and
+      // the user is already authenticated at this point.
+      return { message: updateError.message };
+    }
+
+    return null;
+  },
+
+  // Shared transport for the admin-only Edge Functions. Both of them take a
+  // bearer admin JWT and return either a JSON body or an error shape; the
+  // only differences are the function name and the optional body, so the
+  // fetch/ok/parse dance lives here once.
+  //
+  // Returns null on success. On failure it prefers the function's own
+  // `message`, then its `error` code, then the status line — Edge Functions
+  // in this repo always send `{ error, message? }`.
+  async _callAdminFunction(name: string, body?: unknown): Promise<AuthError | null> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return { message: 'You are not signed in.' };
 
     let response: Response;
     try {
-      response = await fetch(`${SUPABASE_URL}/functions/v1/delete-admin-account`, {
+      response = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
         method: 'POST',
         headers: {
           // apikey is required by the Supabase gateway; Authorization carries
@@ -46,6 +120,7 @@ export const AuthService = {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch (e: unknown) {
       return { message: e instanceof Error ? e.message : 'Network error.' };
@@ -54,16 +129,40 @@ export const AuthService = {
     if (!response.ok) {
       let detail = `Server returned ${response.status}.`;
       try {
-        const body = await response.json() as { message?: string; error?: string };
-        if (body.message) detail = body.message;
-        else if (body.error) detail = body.error;
+        const parsed = await response.json() as { message?: string; error?: string };
+        if (parsed.message) detail = parsed.message;
+        else if (parsed.error) detail = parsed.error;
       } catch { /* keep the status-line detail */ }
       return { message: detail };
     }
+
+    return null;
+  },
+
+  // Calls the delete-admin-account Edge Function, which validates the bearer
+  // JWT and removes the row from auth.users via the service role. On success,
+  // clears the local session — supabase.auth.signOut() would 401 against the
+  // now-deleted user, so we drop the session directly instead.
+  async deleteAccount(): Promise<AuthError | null> {
+    const err = await this._callAdminFunction('delete-admin-account');
+    if (err) return err;
 
     // Drop the local session — the auth.users row is gone, so any further
     // call with this access token would 401.
     await supabase.auth.signOut().catch(() => { /* expected to 401 */ });
     return null;
   },
+
+  // Calls the invite-admin Edge Function, which re-resolves the caller as a
+  // real auth.users row and then issues auth.admin.inviteUserByEmail via the
+  // service role. Public sign-up is disabled on this project, so this is the
+  // only way a second admin account comes into existence.
+  //
+  // Unlike signIn, the error text here is NOT flattened. The caller has
+  // already proved they are an admin, so "that email already has an account"
+  // tells them nothing they could not learn another way, and it is the one
+  // response that stops them re-sending an invite that will never arrive.
+  async inviteAdmin(email: string): Promise<AuthError | null> {
+    return this._callAdminFunction('invite-admin', { email: email.trim().toLowerCase() });
+  }
 };
