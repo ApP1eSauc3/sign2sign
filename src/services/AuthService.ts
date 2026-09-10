@@ -2,6 +2,48 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 
 export type AuthError = { message: string };
 
+// Shared transport for the admin-only Edge Functions. Both of them take a
+// bearer admin JWT and return either a JSON body or an error shape; the
+// only differences are the function name and the optional body, so the
+// fetch/ok/parse dance lives here once.
+//
+// Returns null on success. On failure it prefers the function's own
+// `message`, then its `error` code, then the status line — Edge Functions
+// in this repo always send `{ error, message? }`.
+async function callAdminFunction(name: string, body?: unknown): Promise<AuthError | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { message: 'You are not signed in.' };
+
+  let response: Response;
+  try {
+    response = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+      method: 'POST',
+      headers: {
+        // apikey is required by the Supabase gateway; Authorization carries
+        // the admin's JWT so the function can identify the caller.
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  } catch (e: unknown) {
+    return { message: e instanceof Error ? e.message : 'Network error.' };
+  }
+
+  if (!response.ok) {
+    let detail = `Server returned ${response.status}.`;
+    try {
+      const parsed = await response.json() as { message?: string; error?: string };
+      if (parsed.message) detail = parsed.message;
+      else if (parsed.error) detail = parsed.error;
+    } catch { /* keep the status-line detail */ }
+    return { message: detail };
+  }
+
+  return null;
+}
+
 export const AuthService = {
   // Every failure returns the same string. Supabase's own "Invalid login
   // credentials" is already generic, but "Email not confirmed" is not — it
@@ -97,54 +139,12 @@ export const AuthService = {
     return null;
   },
 
-  // Shared transport for the admin-only Edge Functions. Both of them take a
-  // bearer admin JWT and return either a JSON body or an error shape; the
-  // only differences are the function name and the optional body, so the
-  // fetch/ok/parse dance lives here once.
-  //
-  // Returns null on success. On failure it prefers the function's own
-  // `message`, then its `error` code, then the status line — Edge Functions
-  // in this repo always send `{ error, message? }`.
-  async _callAdminFunction(name: string, body?: unknown): Promise<AuthError | null> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return { message: 'You are not signed in.' };
-
-    let response: Response;
-    try {
-      response = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
-        method: 'POST',
-        headers: {
-          // apikey is required by the Supabase gateway; Authorization carries
-          // the admin's JWT so the function can identify the caller.
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
-    } catch (e: unknown) {
-      return { message: e instanceof Error ? e.message : 'Network error.' };
-    }
-
-    if (!response.ok) {
-      let detail = `Server returned ${response.status}.`;
-      try {
-        const parsed = await response.json() as { message?: string; error?: string };
-        if (parsed.message) detail = parsed.message;
-        else if (parsed.error) detail = parsed.error;
-      } catch { /* keep the status-line detail */ }
-      return { message: detail };
-    }
-
-    return null;
-  },
-
   // Calls the delete-admin-account Edge Function, which validates the bearer
   // JWT and removes the row from auth.users via the service role. On success,
   // clears the local session — supabase.auth.signOut() would 401 against the
   // now-deleted user, so we drop the session directly instead.
   async deleteAccount(): Promise<AuthError | null> {
-    const err = await this._callAdminFunction('delete-admin-account');
+    const err = await callAdminFunction('delete-admin-account');
     if (err) return err;
 
     // Drop the local session — the auth.users row is gone, so any further
@@ -163,6 +163,6 @@ export const AuthService = {
   // tells them nothing they could not learn another way, and it is the one
   // response that stops them re-sending an invite that will never arrive.
   async inviteAdmin(email: string): Promise<AuthError | null> {
-    return this._callAdminFunction('invite-admin', { email: email.trim().toLowerCase() });
+    return callAdminFunction('invite-admin', { email: email.trim().toLowerCase() });
   }
 };

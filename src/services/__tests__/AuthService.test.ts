@@ -260,6 +260,15 @@ describe('deleteAccount', () => {
     expect((global.fetch as jest.Mock).mock.calls[0][1]).not.toHaveProperty('body');
   });
 
+  // The shared transport is a module-level function, not a method, precisely
+  // so this holds. A `this._callAdminFunction(...)` call would throw here.
+  it('works when destructured off the object', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse({ deleted: true }));
+    const { deleteAccount, inviteAdmin } = AuthService;
+    await expect(deleteAccount()).resolves.toBeNull();
+    await expect(inviteAdmin('a@b.com')).resolves.toBeNull();
+  });
+
   it('leaves the session alone when the deletion fails', async () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse({ error: 'delete_failed', message: 'Could not delete.' }, 500)

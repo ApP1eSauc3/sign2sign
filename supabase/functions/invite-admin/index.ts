@@ -186,8 +186,15 @@ Deno.serve(async (req) => {
     // the caller "already registered" is not a membership oracle for anyone
     // who could not already list the admins. It is the single most useful
     // thing we can say, so it is passed through rather than flattened.
+    // Matched on the error CODE, never on the 422 status. GoTrue returns 422
+    // for both `email_exists` AND `validation_failed` ("Unable to validate
+    // email address: invalid format"), so a status test would tell someone who
+    // typed an address our permissive regex passed and GoTrue rejected that it
+    // "already has an account" — the one message that makes them stop trying.
+    // Both codes verified present in @supabase/auth-js 2.104.1 error-codes.d.ts.
     const alreadyExists =
-      inviteError.status === 422 || /already (been )?registered|already exists/i.test(inviteError.message);
+      inviteError.code === 'email_exists' ||
+      /already (been )?registered|already exists/i.test(inviteError.message);
     if (alreadyExists) {
       return jsonResponse(
         req,
