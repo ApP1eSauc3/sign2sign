@@ -215,8 +215,25 @@ The service role key is never shipped in the app; only the Edge Functions hold i
 
 1. Admin opens app → selects Admin mode → enters email and password
 2. `AuthService.signIn()` calls `supabase.auth.signInWithPassword()`
-3. On success, `useAppStore` sets `AppMode.AdminAuthenticated`
+3. On success, `AdminLoginScreen` replaces the route with `AdminDashboard`
 4. Root navigator renders the Admin stack
+
+`AppMode.AdminAuthenticated` is set by `ModeSelectScreen` on mode selection,
+**not** by a successful sign-in — it selects which world is rendered, not
+whether anyone is signed in. (Corrected 2026-09-10; the previous wording said
+sign-in set it, which no code has ever done.)
+
+Public sign-up is disabled, so an admin account is created only by invitation,
+and there are two more ways into the Admin stack:
+
+- **Forgot password** — `AuthService.requestPasswordReset` emails a 6-digit code.
+- **Admin invite** — an existing admin invites another from `AccountScreen`, via
+  the `invite-admin` Edge Function.
+
+Both finish on `SetPasswordScreen` with `AuthService.completePasswordReset`. The
+code is typed into the app; the link in the email is never followed. Canonical
+detail — including why there is no deep link, and the dashboard steps both flows
+depend on — lives in `src/services/CLAUDE.md` §"The two email-code flows".
 
 ### Driver (codeless)
 
