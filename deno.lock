@@ -1,0 +1,44 @@
+{
+  "version": "5",
+  "remote": {
+    "https://esm.sh/@supabase/supabase-js@2.45.0": "36ae57c3f2dc3f94fd122a846b40a87114d29bb2f47e910cb46bee5575febf2e"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@electron/fuses@^1.8.0",
+        "npm:@react-native-async-storage/async-storage@2.2.0",
+        "npm:@react-navigation/native-stack@^7.14.5",
+        "npm:@react-navigation/native@^7.1.33",
+        "npm:@supabase/supabase-js@^2.99.2",
+        "npm:@types/jest@^29.5.14",
+        "npm:@types/react@~19.2.2",
+        "npm:electron-builder@^25.1.8",
+        "npm:electron-updater@^6.8.3",
+        "npm:electron@^41.0.3",
+        "npm:expo-auth-session@~55.0.9",
+        "npm:expo-crypto@~55.0.19",
+        "npm:expo-haptics@~55.0.9",
+        "npm:expo-image-manipulator@~55.0.11",
+        "npm:expo-image-picker@~55.0.13",
+        "npm:expo-location@~55.1.4",
+        "npm:expo-network@~55.0.9",
+        "npm:expo-secure-store@~55.0.9",
+        "npm:expo-status-bar@~55.0.4",
+        "npm:expo-web-browser@~55.0.10",
+        "npm:expo@~55.0.7",
+        "npm:jest@^29.7.0",
+        "npm:react-dom@19.2.0",
+        "npm:react-native-maps@1.27.2",
+        "npm:react-native-safe-area-context@~5.6.2",
+        "npm:react-native-screens@4.23",
+        "npm:react-native-web@0.21",
+        "npm:react-native@0.83.2",
+        "npm:react@19.2.0",
+        "npm:ts-jest@^29.4.11",
+        "npm:typescript@~5.9.2",
+        "npm:zustand@^5.0.12"
+      ]
+    }
+  }
+}

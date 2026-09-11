@@ -14,6 +14,9 @@
     "electron:build:win": "npm run web && electron-builder build --win",
     "verify:electron": "node --check electron/main.js && node --check build/afterPack.js",
     "check:lines": "node scripts/check-lines.js",
+    "verify:functions": "deno check supabase/functions/*/index.ts",
+    "auth:audit": "node scripts/auth-config-audit.js",
+    "auth:apply-templates": "node scripts/apply-auth-templates.js",
     "test": "jest",
     "test:watch": "jest --watch"
   },

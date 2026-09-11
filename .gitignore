@@ -54,3 +54,7 @@ TYPESAFETY.md
 
 # Supabase CLI scratch
 supabase/.temp/
+
+# Backups of live Supabase Auth email templates, written by
+# scripts/auth-config-audit.js. Snapshots of project state, not source.
+supabase/auth-templates/backup/
