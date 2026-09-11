@@ -31,15 +31,81 @@ function fail(message) {
   process.exit(1);
 }
 
+// Supabase personal access tokens are `sbp_` + hex. They are NOT JWTs, and
+// they are NOT the project's anon/service_role keys — passing one of those
+// gets a bare `401 {"message":"JWT could not be decoded"}` from the API, which
+// says nothing about what went wrong. Every failure mode below is one someone
+// actually hits, so each gets its own message.
+function describeBadToken(token) {
+  if (/[…]/.test(token)) {
+    return 'It contains "…" — that is the placeholder from the docs, not a token.\n' +
+           '  Copy the real value from https://supabase.com/dashboard/account/tokens';
+  }
+  if (/^["\']|["\']$/.test(token)) {
+    return 'It is wrapped in quotes. Use: export SUPABASE_ACCESS_TOKEN=sbp_xxx  (no quotes)';
+  }
+  if (/\s/.test(token)) {
+    return 'It contains whitespace or a newline — likely a copy-paste artifact.';
+  }
+  if (token.startsWith('eyJ') || (token.match(/\./g) || []).length === 2) {
+    return 'That is a JWT — one of the project API keys (anon or service_role).\n' +
+           '  Those authenticate to the PROJECT. The Management API needs an\n' +
+           '  ACCOUNT-level personal access token, which starts with "sbp_".';
+  }
+  if (token.startsWith('sb_publishable_') || token.startsWith('sb_secret_')) {
+    return 'That is a project API key, not an account token. You need an "sbp_" token.';
+  }
+  if (!token.startsWith('sbp_')) {
+    return `It does not start with "sbp_" (starts with "${token.slice(0, 4)}…").`;
+  }
+  return `It starts with "sbp_" but is ${token.length} characters, which is shorter than expected.`;
+}
+
+// Falls back to the token `supabase login` stored in the macOS keychain, so
+// the common case needs no export at all. Read at runtime on the user's own
+// machine; the value is never printed or written anywhere.
+function tokenFromKeychain() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync(
+      'security',
+      ['find-generic-password', '-s', 'Supabase CLI', '-a', 'supabase', '-w'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    return out || null;
+  } catch {
+    return null;  // no entry, or the user declined the keychain prompt
+  }
+}
+
 function getAccessToken() {
-  const token = process.env.SUPABASE_ACCESS_TOKEN;
+  let token = process.env.SUPABASE_ACCESS_TOKEN;
+  let source = 'SUPABASE_ACCESS_TOKEN';
+
+  if (!token) {
+    token = tokenFromKeychain();
+    source = 'the macOS keychain (stored by `supabase login`)';
+  }
+
   if (!token) {
     fail(
-      'SUPABASE_ACCESS_TOKEN is not set.\n\n' +
-      '  Create one at https://supabase.com/dashboard/account/tokens, then:\n' +
-      '    export SUPABASE_ACCESS_TOKEN=sbp_…\n\n' +
-      '  It is an account-scoped credential. Do not commit it and do not paste\n' +
-      '  it into a file in this repo.'
+      'No Supabase access token found.\n\n' +
+      '  Either run:   supabase login\n' +
+      '  or create one at https://supabase.com/dashboard/account/tokens and:\n' +
+      '    export SUPABASE_ACCESS_TOKEN=sbp_xxxxxxxx\n\n' +
+      '  This is an ACCOUNT-scoped credential, not a project API key.\n' +
+      '  Do not commit it or paste it into a file in this repo.'
+    );
+  }
+
+  token = token.trim();
+  if (!/^sbp_[A-Za-z0-9]{32,}$/.test(token)) {
+    fail(
+      `The token from ${source} is not a valid personal access token.\n\n` +
+      `  ${describeBadToken(token)}\n\n` +
+      '  A valid one looks like: sbp_ followed by ~40 hex characters.\n' +
+      '  Get one at https://supabase.com/dashboard/account/tokens'
     );
   }
   return token;
