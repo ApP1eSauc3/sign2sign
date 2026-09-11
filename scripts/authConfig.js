@@ -79,16 +79,22 @@ function tokenFromKeychain() {
   }
 }
 
+const TOKEN_PATTERN = /^sbp_[A-Za-z0-9]{32,}$/;
+
+// Tries every place a token can come from and uses the first VALID one,
+// rather than the first *present* one.
+//
+// That distinction matters: a stale `export SUPABASE_ACCESS_TOKEN=<project
+// key>` in the shell would otherwise shadow a perfectly good token from
+// `supabase login`, and the fix ("unset it") is not something the error
+// message could reasonably be expected to suggest.
 function getAccessToken() {
-  let token = process.env.SUPABASE_ACCESS_TOKEN;
-  let source = 'SUPABASE_ACCESS_TOKEN';
+  const candidates = [
+    { token: process.env.SUPABASE_ACCESS_TOKEN, source: 'SUPABASE_ACCESS_TOKEN' },
+    { token: tokenFromKeychain(), source: 'the macOS keychain (`supabase login`)' },
+  ].map((c) => ({ ...c, token: (c.token || '').trim() })).filter((c) => c.token);
 
-  if (!token) {
-    token = tokenFromKeychain();
-    source = 'the macOS keychain (stored by `supabase login`)';
-  }
-
-  if (!token) {
+  if (candidates.length === 0) {
     fail(
       'No Supabase access token found.\n\n' +
       '  Either run:   supabase login\n' +
@@ -99,16 +105,30 @@ function getAccessToken() {
     );
   }
 
-  token = token.trim();
-  if (!/^sbp_[A-Za-z0-9]{32,}$/.test(token)) {
-    fail(
-      `The token from ${source} is not a valid personal access token.\n\n` +
-      `  ${describeBadToken(token)}\n\n` +
-      '  A valid one looks like: sbp_ followed by ~40 hex characters.\n' +
-      '  Get one at https://supabase.com/dashboard/account/tokens'
-    );
+  const valid = candidates.find((c) => TOKEN_PATTERN.test(c.token));
+  if (valid) {
+    // Say so when a later source rescued an earlier bad one, so nobody spends
+    // an afternoon wondering which credential actually authenticated.
+    if (candidates[0] !== valid) {
+      console.warn(
+        `\n  ⚠️  ${candidates[0].source} is not a valid token — ignoring it and\n` +
+        `      using ${valid.source} instead. Consider: unset SUPABASE_ACCESS_TOKEN\n`
+      );
+    }
+    return valid.token;
   }
-  return token;
+
+  const first = candidates[0];
+  const alsoTried = candidates.length > 1
+    ? `\n  (also tried ${candidates.slice(1).map((c) => c.source).join(', ')} — no valid token there either)`
+    : '\n  (no token in the macOS keychain either — try: supabase login)';
+  fail(
+    `The token from ${first.source} is not a valid personal access token.\n\n` +
+    `  ${describeBadToken(first.token)}\n` +
+    `${alsoTried}\n\n` +
+    '  A valid one looks like: sbp_ followed by ~40 hex characters.\n' +
+    '  Get one at https://supabase.com/dashboard/account/tokens'
+  );
 }
 
 // The CLI writes the linked project ref here on `supabase link`. Reading it
