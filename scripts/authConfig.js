@@ -64,16 +64,38 @@ function describeBadToken(token) {
 // Falls back to the token `supabase login` stored in the macOS keychain, so
 // the common case needs no export at all. Read at runtime on the user's own
 // machine; the value is never printed or written anywhere.
+//
+// The CLI is a Go program using zalando/go-keyring, which does NOT store the
+// secret verbatim: it base64-encodes it behind a `go-keyring-base64:` prefix.
+// Reading the raw item therefore yields something starting "go-k…", which is
+// not a token and must be decoded. Verified against this machine's own
+// keychain item on 2026-09-11 — an earlier version of this function assumed a
+// verbatim string and reported a perfectly good login as an invalid token.
+const KEYRING_PREFIXES = ['go-keyring-base64:', 'go-keyring-encoded:'];
+
+function decodeKeyringValue(raw) {
+  for (const prefix of KEYRING_PREFIXES) {
+    if (raw.startsWith(prefix)) {
+      try {
+        return Buffer.from(raw.slice(prefix.length), 'base64').toString('utf8').trim();
+      } catch {
+        return null;
+      }
+    }
+  }
+  return raw;  // older CLI versions, and non-macOS backends, store it verbatim
+}
+
 function tokenFromKeychain() {
   if (process.platform !== 'darwin') return null;
   try {
     const { execFileSync } = require('child_process');
-    const out = execFileSync(
+    const raw = execFileSync(
       'security',
       ['find-generic-password', '-s', 'Supabase CLI', '-a', 'supabase', '-w'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
-    return out || null;
+    return raw ? decodeKeyringValue(raw) : null;
   } catch {
     return null;  // no entry, or the user declined the keychain prompt
   }
