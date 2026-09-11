@@ -51,13 +51,26 @@ async function main() {
   }
 
   // Back up whatever is live before apply-auth-templates.js can replace it.
+  //
+  // Timestamped to the SECOND, and never overwritten. The first version of
+  // this used a date-only name, so running the audit again after applying new
+  // templates silently replaced the only copy of the originals with the new
+  // content — a backup a later run can clobber is not a backup. Found the day
+  // it was written, by re-running the audit to verify an apply.
   const backupDir = path.join(REPO_ROOT, 'supabase', 'auth-templates', 'backup');
   fs.mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   console.log('\nLive email templates backed up to supabase/auth-templates/backup/:');
   for (const [field, name] of TEMPLATE_FIELDS) {
     const content = config[field] ?? '';
-    const file = path.join(backupDir, `${name}.${today}.html`);
-    fs.writeFileSync(file, content);
+    const file = path.join(backupDir, `${name}.${stamp}.html`);
+    // wx: fail rather than overwrite. Two runs inside one second are the only
+    // way to collide, and losing that duplicate costs nothing.
+    try {
+      fs.writeFileSync(file, content, { flag: 'wx' });
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
     const hasToken = content.includes('{{ .Token }}');
     console.log(
       `  ${name.padEnd(9)} ${String(content.length).padStart(5)} bytes  ` +
