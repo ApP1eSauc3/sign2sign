@@ -17,6 +17,7 @@
     "verify:functions": "deno check supabase/functions/*/index.ts",
     "auth:audit": "node scripts/auth-config-audit.js",
     "auth:apply-templates": "node scripts/apply-auth-templates.js",
+    "auth:apply-smtp": "node scripts/apply-smtp.js",
     "test": "jest",
     "test:watch": "jest --watch"
   },
