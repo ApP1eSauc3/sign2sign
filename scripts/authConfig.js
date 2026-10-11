@@ -16,6 +16,11 @@ const API_ROOT = 'https://api.supabase.com/v1';
 // believed unreadable from a terminal. They are readable — this is the list.
 const AUDIT_FIELDS = [
   'mailer_otp_exp',
+  'mailer_otp_length',
+  'password_min_length',
+  'password_required_characters',
+  'password_hibp_enabled',
+  'security_update_password_require_reauthentication',
   'rate_limit_email_sent',
   'rate_limit_verify',
   'rate_limit_token_refresh',

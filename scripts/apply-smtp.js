@@ -15,7 +15,7 @@
 //   export SMTP_PORT=465
 //   export SMTP_USER=resend
 //   export SMTP_PASS=re_xxxxxxxx            # the provider's API key
-//   export SMTP_ADMIN_EMAIL=noreply@send.sign2site.com.au
+//   export SMTP_ADMIN_EMAIL=noreply@sign2site.com.au
 //   export SMTP_SENDER_NAME="Sign2Sign"
 //   node scripts/apply-smtp.js --dry-run
 //   node scripts/apply-smtp.js
