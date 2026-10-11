@@ -1,197 +1,181 @@
-# Sign2Sign — Privacy Policy
+<!--
+  Source of truth for the published policy (client's page:
+  https://sign2site.com.au/sign2sign-privacy/ once live). Rewritten 2026-10-11
+  to describe the launch product, not the repo state. Every lifecycle claim
+  names its mechanism here (CLAUDE.md doc rule 3); none of this comment is
+  published.
 
-**Effective date:** 2026-05-31
-**Last updated:** 2026-10-11
+  - Code-attempt logs, 24h + nightly prune: migration 007 (pg_cron), IP column 017
+  - Security log, 1 year: migration 016 (prune_security_events cron)
+  - Session limits 30 days / 24h idle: scripts/apply-security-settings.js
+    (Pro plan only; must be applied before this text is published)
+  - Two-step sign-in enforcement: migration 018; re-confirmation: _shared/recentAuth.ts
+  - Codes unusable at 06:00 next day: codeFactory.expiryNextMorning + 012 grace
+  - Photo resize 1600 px: JobPhotoService MAX_PHOTO_DIMENSION
+  - Signed URLs 1 h: createSignedUrl(key, 3600)
+  - Supabase log retention 7 days: Supabase Pro plan (supabase.com/pricing, 2026-10-11)
+  - Resend: domain must be created in the Tokyo (ap-northeast-1) region
+  - Google Maps Platform: geocode-address (admin import) + optimize-route (job-site
+    coordinates only, never the driver's position)
+  - Driver position on the map: DriverMapScreen showsUserLocation (on device only)
+  - Mac updates: electron-updater -> GitHub releases (electron-builder.yml publish)
+-->
 
-This policy explains what data the Sign2Sign mobile app and Electron admin
-app ("Sign2Sign", "the app") collect, why, how it is stored, and what your
-rights are.
+# Sign2Sign Privacy Policy
 
-Sign2Sign is operated by **Sign2Site Pty Ltd** ("we", "us") on behalf
-of Sign2Site (sign2site.com.au). For privacy enquiries contact
-**bryanna@sign2site.com.au**.
+**Effective date:** 31 May 2026
+**Last updated:** 11 October 2026
+
+Sign2Sign is the job-management app used by Sign2Site and its installation crews to plan sign installations and removals and to record proof that each job was completed. It is available as an iPhone app and as a desktop app for Mac.
+
+This policy explains what information Sign2Sign collects, why we collect it, where it is kept, who else handles it on our behalf, how long we keep it, and the rights you have.
+
+Sign2Sign is operated by **Sign2Site Pty Ltd** ("Sign2Site", "we", "us"). For any privacy question, contact **bryanna@sign2site.com.au**.
 
 ---
 
-## 1. Who uses Sign2Sign
+## 1. Who this policy covers
 
-The app has two user types:
-
-- **Admins** — office staff who sign in with an email + password to manage
-  routes, import jobs, and review completion records.
-- **Drivers** — field crew who enter a 6-digit daily code to work a route.
-  Drivers have no account, no email, no password — the code is the only
-  credential.
-
-This policy covers both.
+- **Office staff ("admins").** They sign in with an email address and password to import jobs, plan routes, issue driver codes and review completed work.
+- **Drivers.** They work a route by entering a 6-digit code issued for that day. Drivers have no account, email address or password in Sign2Sign.
+- **Clients and agents named on a job.** They do not use the app, but a job record includes the site address and the agent's email address.
 
 ---
 
-## 2. What we collect, and why
+## 2. Information we collect
 
-We collect only what the job needs. There is no analytics SDK, no
-advertising SDK, and no third-party tracking in the app (verified against
-`package.json`).
+We collect only what is needed to run jobs and keep the app secure. Sign2Sign contains no analytics, advertising or tracking tools, and we do not sell personal information or use it for advertising.
 
-### From admins
+### 2.1 Admins
 
-| Data | Why we need it | Where it lives |
+| Information | Why we collect it | Where it is kept |
 |---|---|---|
-| Email address + password | Sign in to the admin console | Supabase Auth |
-| Authenticator-app secret (only if you turn on two-step sign-in) | Ask for a 6-digit code at sign-in as well as your password | Supabase Auth |
-| Security log: each sign-in, admin invite, account deletion, job deletion and driver-code creation, with your user ID and email, plus your IP address for invites and deletions | Detect and investigate misuse of admin accounts | Supabase Postgres (`security_events`) |
-| Google OAuth token (only if you connect Google Sheets) | Import jobs from a Sheet you own | Device SecureStore — never leaves your device |
-| Routes, codes, and job imports you create | Operate the service | Supabase Postgres |
+| Email address and password | To sign you in. Your password is stored only in scrambled (hashed) form and cannot be read by anyone, including us | Supabase (our hosting provider) |
+| Two-step sign-in key, if you turn two-step sign-in on | To check the 6-digit code from your authenticator app when you sign in | Supabase |
+| Security log: each sign-in, admin invitation, account deletion, job deletion and driver-code creation, with your user ID and email address, plus your network (IP) address for invitations and deletions | To detect and investigate misuse of admin accounts | Supabase |
+| Google Sheets connection, if you connect it | To import jobs from a Google Sheet you choose | On your own device only; it is never sent to our servers |
+| Routes, driver codes and jobs you create | To run the service | Supabase |
 
-### From drivers
+### 2.2 Drivers
 
-| Data | Why we need it | Where it lives |
+| Information | Why we collect it | Where it is kept |
 |---|---|---|
-| 6-digit daily route code | Authenticate you for that day's route | Sent to a Supabase Edge Function; held in app memory during your shift. If you work offline, pending uploads (which include the code) are kept on the device until they sync, then removed |
-| Job photos (camera) | Evidence the work was completed | Supabase Storage (bucket `job-photos`) |
-| GPS latitude/longitude at the moment a photo is taken | Verify the photo was taken at the work site | Stored on the job record (`photo_gps_lat`, `photo_gps_lng`) |
-| Anonymous device ID (random UUID) | Per-device rate limit on code-validation attempts | Device SecureStore + sent with each code attempt |
-| Network IP address of each code attempt | Per-network rate limit on code-validation attempts, so codes cannot be guessed by switching device IDs; repeated lockouts are recorded in the security log | Supabase Postgres (`code_attempts`, and `security_events` for lockouts) |
+| The day's 6-digit route code | To open that day's route | Checked by our server; kept in the app's memory during your shift. If you work without signal, unsent uploads (which include the code) are stored on the device until they send, then deleted |
+| Job photos | Proof that the work was completed | Supabase, in private storage |
+| Your location at the moment a job photo is uploaded | To confirm the photo was taken at the work site | Saved with that job's record in Supabase |
+| A random device identifier, created by the app | To limit repeated wrong-code attempts from one device | On the device, and sent with each code attempt |
+| The network (IP) address of each code attempt | To limit wrong-code attempts from one network, so codes cannot be guessed by switching devices. Repeated lockouts are recorded in the security log | Supabase |
 
-We do **not** collect: continuous location tracking, contacts, microphone
-audio, advertising identifiers, device fingerprints, or any data not
-listed above. The app does not request microphone access on any
-platform.
+**Your position on the route map.** While a driver has the route map open, the map shows the driver's current position as a dot, so they can see where they are relative to the next job. This position stays on the phone. It is not sent to us or saved anywhere.
 
-### From a Google Sheet you import
+### 2.3 Jobs, clients and agents
 
-When an admin imports jobs from a Google Sheet, each job row carries a
-client's **agent email**. We store it on the job so the driver's
-completion email can be addressed to the correct agent automatically.
-Agents are not users of Sign2Sign; their email is treated as job
-metadata supplied by you.
+Admins import jobs from a Google Sheet. Each job includes the site address, job details and the agent's email address.
 
----
+- **Site addresses** are converted to map coordinates when the job is imported, so the job can be shown on the driver's map. This is done through Google (see section 5).
+- **The agent's email address** is stored with the job so that, once the work is approved, the completion notice is addressed to the right person (see section 4).
 
-## 3. How photos and GPS are used
+### 2.4 What we do not collect
 
-A photo is mandatory before a driver can mark a job complete. At the
-moment the photo upload starts:
-
-1. The camera captures the image. We resize it to a maximum of 1600 px
-   on the longest edge before upload.
-2. The app reads the device's current GPS coordinates.
-3. The photo file and the GPS coordinates are sent to Supabase together,
-   over HTTPS.
-
-The GPS reading is a single point-in-time fix. We do not track location
-between photos, do not run background location, and do not record
-location at any other point in the job flow.
-
-Photos are stored as opaque storage keys — they are not publicly
-accessible. The app generates a short-lived signed URL (1 hour) only at
-display time, only for authorised viewers.
+We do not track location in the background or between jobs. We do not access contacts or the microphone. We do not use advertising identifiers or device fingerprinting. We collect nothing beyond what is listed above.
 
 ---
 
-## 4. Sub-processors
+## 3. How photos and location are used
 
-| Sub-processor | Service | Region | What it sees |
+A photo is required before a driver can mark a job complete. When the driver uploads it:
+
+1. The photo is reduced to at most 1600 pixels on its longest side.
+2. The app takes a single reading of the phone's location.
+3. The photo and that location are sent together to Supabase over an encrypted connection.
+
+Photos are kept in private storage and are never publicly accessible. When an authorised person views a photo, the app creates a link to it that stops working after one hour.
+
+---
+
+## 4. Emails the app sends
+
+- **Sign-in emails.** When an admin resets their password, or when one admin invites another, the app emails a one-time code from **noreply@sign2site.com.au**. These emails are sent through Resend (see section 5) and contain the recipient's email address and the code.
+- **Completion notices.** Drivers never email anyone from the app. When an admin approves a completed job, the app opens the admin's own email program with a message to the agent already filled in. The admin sends it from their own mailbox, and their email provider's privacy terms apply to it.
+
+---
+
+## 5. Service providers
+
+We use the following providers to run Sign2Sign. Each handles only the information described here.
+
+| Provider | What it does for Sign2Sign | Where | What it receives |
 |---|---|---|---|
-| Supabase Inc. | Database, storage, authentication, edge functions | AWS Asia-Pacific (Tokyo) | All admin and job data described above |
-| Google LLC | Sheets API (only if an admin chooses to import from Google Sheets) | Google global infrastructure | The Sheet you authorise; OAuth token stays on your device |
-| Apple Inc. | App Store distribution, push receipt of crash logs you opt to share | Apple global infrastructure | App metadata; crash logs only if you opt in via iOS Settings |
-
-Drivers never email anyone from the app. When a job is complete, an
-admin reviews it and, on approving it, the app opens the admin's own
-mail client with a prefilled message addressed to the agent email on the
-job. The message and its recipient are then handled by that mail
-provider under its own privacy terms.
+| Supabase Inc. | Database, file storage, sign-in and server functions | Amazon Web Services, Tokyo, Japan | All the admin, driver and job information described above |
+| Resend, Inc. | Sends password-reset and invitation emails | Amazon Web Services, Tokyo, Japan | The recipient's email address and the email's content |
+| Google LLC | Converts site addresses into map coordinates, works out the best order to visit job sites, and (if an admin connects it) reads the chosen Google Sheet | Google's global infrastructure | Site addresses; the coordinates of the day's job sites (never the driver's own location); the Google Sheet the admin chooses |
+| Apple Inc. | Distributes the iPhone app, provides the map shown on iPhone, and (if you choose to share them) crash reports | Apple's global infrastructure | Map requests for the area on screen; crash reports only if you opt in through your iPhone's settings |
+| GitHub, Inc. | Hosts the Mac app's downloads and update checks | GitHub's global infrastructure | Your network (IP) address and the app version when the Mac app checks for an update |
 
 ---
 
-## 5. Where data is processed
+## 6. Where information is stored
 
-Supabase hosts the database, storage bucket, and edge functions in
-**AWS Asia-Pacific (Tokyo)**. If you use the app from outside Australia
-your data is transferred internationally to that region.
+Sign2Sign's database, files, server functions and sign-in emails are hosted in **Tokyo, Japan**. This means information about Australian users is stored and processed outside Australia. Information is encrypted while it is being sent, and Supabase also encrypts it where it is stored.
 
 ---
 
-## 6. How long we keep things
+## 7. How long we keep information
 
-| Data | Retention |
+| Information | How long |
 |---|---|
-| Admin accounts | Until the admin deletes the account in-app (see §7) or we are instructed to delete it |
-| Daily route codes | Become unusable at 06:00 the morning after they are issued (with a short technical grace period for syncing work completed offline). The code record itself is retained with the job history it belongs to |
-| Job records and photos | Retained as the customer's (sign2site.com.au) completion records for as long as the customer requires them; deleted on the customer's instruction or on a verified request (see §7) |
-| Code-attempt logs (anonymous device ID, network IP address + timestamp) | Deleted from the server automatically by a nightly job once older than 24 hours, so kept for at most about 48 hours |
-| Security log (sign-ins, invites, deletions, driver lockouts) | Deleted automatically by a nightly job once older than one year |
-| Anonymous driver device ID | Stored on the device; cleared when the app is uninstalled |
-| Google OAuth tokens | Stored only on the admin's device; revoked when you disconnect or uninstall |
+| Admin accounts | Until the admin deletes the account in the app (see section 8) or we are asked to delete it |
+| Driver route codes | Stop working at 6:00 am the morning after they are issued, with a short extra window so work done without signal can still be sent. The code record stays with the job history it belongs to |
+| Jobs, photos and photo locations | Kept as Sign2Site's completion records for as long as Sign2Site needs them, and deleted on Sign2Site's instruction or on a verified request (see section 8) |
+| Code-attempt records (device identifier, network address and time) | Deleted automatically each night once they are more than 24 hours old, so kept for at most about 48 hours |
+| Security log | Deleted automatically each night once more than one year old |
+| Supabase service logs (these include network addresses) | Kept by Supabase for up to 7 days |
+| Sign-in emails | Kept by Resend for the period set out in its own privacy terms |
+| Driver device identifier | On the device until the app is uninstalled |
+| Google Sheets connection | On the admin's device until they disconnect it or uninstall the app |
 
 ---
 
-## 7. Your rights
+## 8. Your rights
 
-You can ask us to access, correct, or delete personal data we hold about
-you. To exercise these rights, email **bryanna@sign2site.com.au**.
+You can ask to see, correct or delete personal information we hold about you by emailing **bryanna@sign2site.com.au**. We will respond within 30 days.
 
-**Admin account deletion in the app.** Admins can permanently delete
-their own account from inside the app: open **Account → Delete
-account**, confirm, and the account plus its auth record is removed
-immediately. Routes and jobs the admin created remain on the customer's
-records (they belong to the operating entity, not to the admin
-personally) — if you need those removed too, contact us.
+- **Admins** can delete their own account at any time in the app: open **Account**, then **Delete account**. The account and its sign-in details are removed straight away. Jobs and routes the admin created stay with Sign2Site's records because they belong to the business. Contact us if you also want those removed.
+- **Drivers** have no account. Uninstalling the app removes everything it stored on the phone. Photos and locations already uploaded stay with Sign2Site's completion records.
 
-**Drivers** have no account to delete. Uninstalling the app removes
-everything on the device (the anonymous device ID and any cached
-session). Photos and GPS already submitted to Supabase remain as part of
-the customer's completion records.
-
-Australian users: you may complain to the Office of the Australian
-Information Commissioner (oaic.gov.au) if you believe we have mishandled
-your personal information.
-
----
-
-## 8. Children
-
-Sign2Sign is a workplace tool. It is not directed at children and is
-not intended for use by anyone under 16. We do not knowingly collect
-data from children.
+If you are not satisfied with our response, you can complain to the Office of the Australian Information Commissioner at **oaic.gov.au**.
 
 ---
 
 ## 9. Security
 
-- All network traffic uses HTTPS.
-- Admin passwords are handled by Supabase Auth (bcrypt-hashed, never
-  stored in our database in plain text).
-- The driver code path is rate-limited in the database per device and per
-  network; successive incorrect codes are locked out.
-- Admins can turn on two-step sign-in (a code from an authenticator app).
-  Once on, the database refuses that admin's session until the code is
-  entered.
-- Deleting an account or inviting an admin requires entering your password
-  (or authenticator code) again, even when already signed in.
+- All information is sent over encrypted connections.
+- Admin passwords are stored only in hashed form.
+- Admins can turn on two-step sign-in, which asks for a code from an authenticator app as well as the password. Once it is on, the database refuses access until the code is entered.
+- Deleting an account or inviting a new admin requires entering your password (or authenticator code) again, even when you are already signed in.
 - Admin sessions end after 30 days, or after 24 hours without use.
-- The Supabase service-role key never ships in the app. It exists only
-  in server-side edge functions.
-- Photo storage uses private buckets with row-level security policies;
-  URLs to images are short-lived signed URLs generated at display time.
+- Repeated wrong driver codes are blocked, both per device and per network.
+- Photos are kept in private storage, and links to them expire after one hour.
+- Access to the database is restricted so that each user can only reach what their role allows.
 
-No system is perfectly secure. If you believe you've found a security
-issue, please email **bryanna@sign2site.com.au** rather than disclosing
-it publicly.
+No system is completely secure. If you believe you have found a security problem, please email **bryanna@sign2site.com.au** rather than disclosing it publicly.
 
 ---
 
-## 10. Changes to this policy
+## 10. Children
 
-If we make a material change to this policy, we will update the
-"Last updated" date above. The current version of this policy is always
-available at the URL listed on the App Store page.
+Sign2Sign is a workplace tool. It is not intended for anyone under 16, and we do not knowingly collect information from children.
 
 ---
 
-## 11. Contact
+## 11. Changes to this policy
+
+If we make a significant change, we will update the "Last updated" date at the top. The current version is always available at the address shown on Sign2Sign's App Store page.
+
+---
+
+## 12. Contact
 
 **Sign2Site Pty Ltd**
 Perth WA 6031, Australia
-Privacy enquiries: **bryanna@sign2site.com.au**
+Email: **bryanna@sign2site.com.au**
