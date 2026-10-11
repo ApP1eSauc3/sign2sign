@@ -10,6 +10,10 @@
 // Deploy:
 //   supabase functions deploy validate-code --no-verify-jwt
 //
+// ⚠️ Since 2026-10-11 this calls validate_route_code(code, client_id, ip) and
+//    record_security_event(), which exist only after migrations 016 and 017.
+//    Run `supabase db push` first, then deploy this.
+//
 // The --no-verify-jwt flag is correct here: drivers do NOT have Supabase
 // Auth accounts, so there is no JWT to verify. Throttling + the RPC's own
 // SECURITY DEFINER checks provide all the authorisation we need.
@@ -23,6 +27,8 @@
 // switched over without downtime.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { clientIp } from '../_shared/clientIp.ts';
+import { recordSecurityEvent } from '../_shared/securityEvents.ts';
 
 // In-memory IP throttle. Edge Functions are stateless across invocations on
 // cold starts but reuse memory across warm invocations on the same worker —
@@ -46,11 +52,26 @@ function checkIpThrottle(ip: string): boolean {
   return entry.count <= MAX_PER_WINDOW;
 }
 
-// Periodic cleanup so the Map doesn't grow without bound on a long-lived worker.
+// A lockout is logged to security_events once per IP per minute, not once per
+// refused request: under a real attack the refusals arrive many times a
+// second, and the useful fact is "this IP was locked out", not each retry.
+const lockoutLogged = new Map<string, number>();
+function shouldLogLockout(key: string): boolean {
+  const now = Date.now();
+  const last = lockoutLogged.get(key);
+  if (last !== undefined && now - last < WINDOW_MS) return false;
+  lockoutLogged.set(key, now);
+  return true;
+}
+
+// Periodic cleanup so the Maps don't grow without bound on a long-lived worker.
 setInterval(() => {
   const cutoff = Date.now() - WINDOW_MS * 2;
   for (const [ip, entry] of ipAttempts) {
     if (entry.windowStart < cutoff) ipAttempts.delete(ip);
+  }
+  for (const [key, at] of lockoutLogged) {
+    if (at < cutoff) lockoutLogged.delete(key);
   }
 }, WINDOW_MS).unref?.();
 
@@ -75,12 +96,17 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'method_not_allowed' }, 405);
   }
 
-  // Supabase API gateway forwards the caller IP in x-forwarded-for.
-  // First entry is the client; subsequent entries are gateway hops.
-  const xff = req.headers.get('x-forwarded-for') ?? '';
-  const ip = xff.split(',')[0]?.trim() || 'unknown';
+  // Supabase API gateway forwards the caller IP in x-forwarded-for; clientIp()
+  // takes the first entry and returns null unless it is a well-formed address.
+  const callerIp = clientIp(req);
+  const ip = callerIp ?? 'unknown';
 
   if (!checkIpThrottle(ip)) {
+    if (shouldLogLockout(`mem:${ip}`)) {
+      await recordSecurityEvent(supabase, {
+        type: 'driver.lockout', ip: callerIp, detail: { limit: 'ip_memory' },
+      });
+    }
     return jsonResponse(
       { error: 'rate_limited', message: 'Too many attempts. Wait a minute and try again.' },
       429
@@ -122,13 +148,23 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'client_id_required' }, 400);
   }
 
+  // 3-argument form (migration 017): the IP makes the per-network limit
+  // durable in Postgres instead of only in this worker's memory.
   const { data, error } = await supabase.rpc('validate_route_code', {
     p_code: code,
     p_client_id: clientId,
+    p_ip: callerIp,
   });
 
   if (error) {
-    if (error.code === 'P0005') {
+    // P0005: this device has 5 failures in 60s. P0006: this IP has 30.
+    if (error.code === 'P0005' || error.code === 'P0006') {
+      const limit = error.code === 'P0005' ? 'device' : 'ip';
+      if (shouldLogLockout(`${limit}:${limit === 'device' ? clientId : ip}`)) {
+        await recordSecurityEvent(supabase, {
+          type: 'driver.lockout', ip: callerIp, targetId: limit === 'device' ? clientId : null, detail: { limit },
+        });
+      }
       return jsonResponse(
         { error: 'rate_limited', message: 'Too many attempts. Wait a minute and try again.' },
         429

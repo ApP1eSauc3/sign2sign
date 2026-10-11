@@ -14,8 +14,13 @@
 //      proof of admin: the anon key is itself a project-signed JWT and it ships
 //      in every copy of the app. Only a real auth.users row is admin here —
 //      there is no roles table, every `authenticated` user is an admin.
-//   3. A service-role client calls auth.admin.inviteUserByEmail(email), which
+//   3. The session must be FRESH (password or authenticator code in the last
+//      5 minutes; see ../_shared/recentAuth.ts). Inviting creates a new admin
+//      with full access, so a stolen long-lived session must not be able to.
+//      Answers 403 reauth_required / mfa_required.
+//   4. A service-role client calls auth.admin.inviteUserByEmail(email), which
 //      creates the auth.users row with no password and emails the invite.
+//   5. The invite is written to security_events (migration 016), best effort.
 //
 // Why an OTP and not the invite link:
 //   inviteUserByEmail does not support PKCE (the browser that opens the invite
@@ -32,8 +37,12 @@
 //
 // Deploy:
 //   supabase functions deploy invite-admin
+//   (after migration 016 — it calls record_security_event)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { checkRecentAuth, decodeJwtPayload } from '../_shared/recentAuth.ts';
+import { clientIp } from '../_shared/clientIp.ts';
+import { recordSecurityEvent } from '../_shared/securityEvents.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -141,6 +150,16 @@ Deno.serve(async (req) => {
   }
   const inviterId = userData.user.id;
 
+  const hasVerifiedFactor = (userData.user.factors ?? []).some((f) => f.status === 'verified');
+  const recent = checkRecentAuth(
+    decodeJwtPayload(match[1]) ?? {},
+    hasVerifiedFactor,
+    Math.floor(Date.now() / 1000),
+  );
+  if (!recent.ok) {
+    return jsonResponse(req, { error: recent.error, message: recent.message }, 403);
+  }
+
   const raw = await req.text();
   if (raw.length > MAX_BODY_BYTES) {
     return jsonResponse(req, { error: 'invalid_request', message: 'Request too large.' }, 400);
@@ -213,5 +232,12 @@ Deno.serve(async (req) => {
   // Deliberately does not echo the new user's id: the inviter has no use for
   // it and it is one less identifier on the wire.
   console.log('[invite-admin] invite sent by', inviterId);
+  await recordSecurityEvent(adminClient, {
+    type: 'admin.invited',
+    actorId: inviterId,
+    actorEmail: userData.user.email ?? null,
+    ip: clientIp(req),
+    detail: { invited_email: normalised },
+  });
   return jsonResponse(req, { invited: true, email: normalised });
 });

@@ -29,6 +29,21 @@ const AUDIT_FIELDS = [
   'disable_signup',
   'mailer_autoconfirm',
   'external_email_enabled',
+  // Open-work #32. smtp_host is the observable proof that custom SMTP is live,
+  // because the API never returns smtp_pass. Never add smtp_pass here.
+  // Session limits and the security-event hook (migration 016,
+  // scripts/apply-security-settings.js). Session limits need the Pro plan.
+  'sessions_timebox',
+  'sessions_inactivity_timeout',
+  'hook_custom_access_token_enabled',
+  'hook_custom_access_token_uri',
+  'mfa_totp_enroll_enabled',
+  'mfa_totp_verify_enabled',
+  'smtp_host',
+  'smtp_port',
+  'smtp_user',
+  'smtp_admin_email',
+  'smtp_sender_name',
 ];
 
 function fail(message) {
@@ -195,4 +210,26 @@ async function authConfigRequest(method, body) {
   }
 }
 
-module.exports = { AUDIT_FIELDS, REPO_ROOT, authConfigRequest, getProjectRef, fail };
+// Read-only SQL through the Management API, run as supabase_read_only_user.
+// Used by apply-security-settings.js to confirm a migration is applied before
+// switching on the Auth setting that depends on it. Returns the result rows.
+async function readOnlyQuery(query) {
+  const ref = getProjectRef();
+  const response = await fetch(`${API_ROOT}/projects/${ref}/database/query/read-only`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${getAccessToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query }),
+  });
+  const text = await response.text();
+  if (!response.ok) fail(`Management API read-only query failed: ${response.status}\n  ${text.slice(0, 400)}`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    fail(`Management API returned a non-JSON body:\n  ${text.slice(0, 200)}`);
+  }
+}
+
+module.exports = { AUDIT_FIELDS, REPO_ROOT, authConfigRequest, readOnlyQuery, getProjectRef, fail };

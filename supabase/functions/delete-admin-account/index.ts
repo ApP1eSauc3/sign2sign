@@ -12,19 +12,30 @@
 //      malformed. We re-validate with auth.getUser(token) to catch tokens
 //      that are syntactically valid but reference a user that no longer
 //      exists (e.g. a replayed token after deletion).
-//   3. Function then uses a service-role client to call
+//   3. The session must be FRESH: the user proved their password (or, with
+//      two-step sign-in on, an authenticator code) in the last 5 minutes.
+//      A long-lived session alone cannot delete an account. See
+//      ../_shared/recentAuth.ts. Answers 403 reauth_required / mfa_required.
+//   4. Function then uses a service-role client to call
 //      supabase.auth.admin.deleteUser(user.id), which permanently removes
 //      the row from auth.users. Linked rows in public.* with ON DELETE
 //      CASCADE are removed by the database; rows without a cascade
 //      (route_codes, jobs) are retained intentionally — those belong to
 //      the operating entity, not to the admin personally.
-//   4. Sessions for the deleted user become invalid the moment auth.users
+//   5. The deletion is written to security_events (migration 016) after it
+//      succeeds. Best effort: a failed log write is reported in the function
+//      log but never blocks a user deleting their own account.
+//   6. Sessions for the deleted user become invalid the moment auth.users
 //      is gone — no separate sign-out call is needed server-side.
 //
 // Deploy:
 //   supabase functions deploy delete-admin-account
+//   (after migration 016 — it calls record_security_event)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { checkRecentAuth, decodeJwtPayload } from '../_shared/recentAuth.ts';
+import { clientIp } from '../_shared/clientIp.ts';
+import { recordSecurityEvent } from '../_shared/securityEvents.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -145,11 +156,30 @@ Deno.serve(async (req) => {
     return jsonResponse(req, { error: 'invalid_token' }, 401);
   }
 
-  const userId = userData.user.id;
+  const user = userData.user;
+  const hasVerifiedFactor = (user.factors ?? []).some((f) => f.status === 'verified');
+  const recent = checkRecentAuth(
+    decodeJwtPayload(accessToken) ?? {},
+    hasVerifiedFactor,
+    Math.floor(Date.now() / 1000),
+  );
+  if (!recent.ok) {
+    return jsonResponse(req, { error: recent.error, message: recent.message }, 403);
+  }
+
+  const userId = user.id;
   const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
   if (deleteError) {
     return jsonResponse(req, { error: 'delete_failed', message: deleteError.message }, 500);
   }
+
+  await recordSecurityEvent(adminClient, {
+    type: 'admin.deleted',
+    actorId: userId,
+    actorEmail: user.email ?? null,
+    ip: clientIp(req),
+    targetId: userId,
+  });
 
   return jsonResponse(req, { deleted: true, user_id: userId });
 });

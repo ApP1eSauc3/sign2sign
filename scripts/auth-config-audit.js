@@ -50,6 +50,14 @@ async function main() {
     console.log(`  ${key.padEnd(widest)}  ${describe(key, config[key])}`);
   }
 
+  // Without custom SMTP, GoTrue only delivers to members of the Supabase org,
+  // so a reset or invite to anyone else "succeeds" and never arrives (#32).
+  console.log(
+    config.smtp_host
+      ? `\n✓ Custom SMTP is configured (${config.smtp_host}).`
+      : '\n✗ No custom SMTP. Auth emails reach Supabase org members only (open-work #32).'
+  );
+
   // Back up whatever is live before apply-auth-templates.js can replace it.
   //
   // Timestamped to the SECOND, and never overwritten. The first version of
