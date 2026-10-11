@@ -25,8 +25,13 @@ export default function AppNavigator() {
     // its first value for the lifetime of the listener below.
     const { setMode } = useAppStore.getState();
 
-    AuthService.getSession().then((session) => {
-      if (session) setMode(AppMode.AdminAuthenticated);
+    // A restored session for an admin with two-step sign-in on can be stuck
+    // at aal1 (they closed the app on the code screen). It is not treated as
+    // signed in: the mode stays Undecided, so the next admin sign-in goes
+    // through the code screen again. The database refuses aal1 for that admin
+    // regardless (migration 018).
+    AuthService.getSession().then(async (session) => {
+      if (session && !(await AuthService.needsMfaChallenge())) setMode(AppMode.AdminAuthenticated);
       setIsRestoringSession(false);
     });
 

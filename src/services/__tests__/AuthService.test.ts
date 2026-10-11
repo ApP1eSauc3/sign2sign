@@ -15,6 +15,10 @@ jest.mock('../supabaseClient', () => ({
       resetPasswordForEmail: jest.fn(),
       verifyOtp: jest.fn(),
       updateUser: jest.fn(),
+      // completePasswordReset checks the assurance level after verifyOtp;
+      // these suites cover accounts without two-step sign-in (aal1 → aal1).
+      // The MFA paths are in AuthService.mfa.test.ts.
+      mfa: { getAuthenticatorAssuranceLevel: jest.fn() },
     },
   },
 }));
@@ -41,6 +45,8 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   auth.getSession.mockResolvedValue({ data: SESSION });
   auth.signOut.mockResolvedValue({ error: null });
+  (supabase.auth as unknown as { mfa: { getAuthenticatorAssuranceLevel: jest.Mock } })
+    .mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal1', nextLevel: 'aal1' }, error: null });
 });
 
 afterEach(() => {

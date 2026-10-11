@@ -5,6 +5,7 @@ import AdminRouteDetailScreen from '../screens/admin/AdminRouteDetailScreen';
 import GoogleConnectScreen from '../screens/admin/GoogleConnectScreen';
 import AccountScreen from '../screens/admin/AccountScreen';
 import SetPasswordScreen from '../screens/admin/SetPasswordScreen';
+import MfaChallengeScreen from '../screens/admin/MfaChallengeScreen';
 import { useAppStore } from '../stores/useAppStore';
 import { AppMode } from '../data/SignJob';
 
@@ -18,6 +19,8 @@ export type AdminStackParamList = {
   // against: 'recovery' for forgot-password, 'invite' for a first-time admin.
   // `email` pre-fills the field when the caller already knows it.
   SetPassword: { flow: 'recovery' | 'invite'; email?: string };
+  // Second step of sign-in for an admin with two-step sign-in on (aal1 → aal2).
+  MfaChallenge: undefined;
 };
 
 const Stack = createNativeStackNavigator<AdminStackParamList>();
@@ -44,6 +47,7 @@ export default function AdminStack() {
       <Stack.Screen name="GoogleConnect" component={GoogleConnectScreen} />
       <Stack.Screen name="Account" component={AccountScreen} />
       <Stack.Screen name="SetPassword" component={SetPasswordScreen} />
+      <Stack.Screen name="MfaChallenge" component={MfaChallengeScreen} />
     </Stack.Navigator>
   );
 }

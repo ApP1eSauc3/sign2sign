@@ -17,6 +17,7 @@ import {
   PASSWORD_RULE_HINT,
 } from './setPassword/logic';
 import { styles } from './setPassword/styles';
+import { normaliseTotpInput } from './account/twoStep.logic';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'SetPassword'>;
 
@@ -31,7 +32,9 @@ type Props = NativeStackScreenProps<AdminStackParamList, 'SetPassword'>;
 //
 // Neither flow follows the link in the email. Both read the numeric
 // {{ .Token }} out of it — see AuthService.completePasswordReset for why.
-type Phase = 'request' | 'enter';
+// 'mfa' (two-step sign-in on): the emailed code is spent, but Supabase will
+// not change the password until the authenticator code lifts the session to aal2.
+type Phase = 'request' | 'enter' | 'mfa';
 
 export default function SetPasswordScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -43,6 +46,7 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [totp, setTotp] = useState('');
   const [fieldError, setFieldError] = useState<{ field: SetPasswordField; message: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -97,6 +101,23 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
     });
     setLoading(false);
 
+    if (err?.code === 'mfa_required') {
+      setNotice(err.message);
+      setPhase('mfa');
+      return;
+    }
+    await finish(err);
+  }
+
+  async function handleFinishWithMfa() {
+    setFormError(null);
+    setLoading(true);
+    const err = await AuthService.completePasswordResetWithMfa({ totp, newPassword: password });
+    setLoading(false);
+    await finish(err);
+  }
+
+  async function finish(err: { message: string } | null) {
     if (err) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setFormError(err.message);
@@ -106,6 +127,12 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
     // completePasswordReset leaves a live session behind (verifyOtp mints one),
     // so the dashboard is reachable directly — no trip back through login.
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // An emailed code proves the inbox, not the authenticator: an admin with
+    // two-step sign-in on still owes the app code before the dashboard.
+    if (await AuthService.needsMfaChallenge()) {
+      navigation.replace('MfaChallenge');
+      return;
+    }
     setMode(AppMode.AdminAuthenticated);
     navigation.replace('AdminDashboard');
   }
@@ -155,6 +182,23 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
           onChangeText={setEmail}
           error={errorFor('email')}
         />
+
+        {phase === 'mfa' && (
+          <TextInputField
+            label="Code from your authenticator app"
+            placeholder="123456"
+            keyboardType="number-pad"
+            maxLength={6}
+            textContentType="oneTimeCode"
+            autoComplete="one-time-code"
+            autoFocus
+            returnKeyType="go"
+            onSubmitEditing={handleFinishWithMfa}
+            accessibilityLabel="Six-digit code from your authenticator app"
+            value={totp}
+            onChangeText={(t) => setTotp(normaliseTotpInput(t))}
+          />
+        )}
 
         {phase === 'enter' && (
           <>
@@ -213,8 +257,8 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
 
         {/* The single advancing action — its label is the next step, always */}
         <PrimaryButton
-          label={phase === 'request' ? 'Send code' : 'Set password'}
-          onPress={phase === 'request' ? handleRequestCode : handleSetPassword}
+          label={phase === 'request' ? 'Send code' : phase === 'mfa' ? 'Finish' : 'Set password'}
+          onPress={phase === 'request' ? handleRequestCode : phase === 'mfa' ? handleFinishWithMfa : handleSetPassword}
           loading={loading}
           // DESIGN §1.8 — 56pt (size="standard", the default), not the 48pt
           // admin height. Same intentional exception AdminLoginScreen carries:

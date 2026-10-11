@@ -1,6 +1,18 @@
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
+import * as mfa from './auth/mfa';
 
-export type AuthError = { message: string };
+// `code` is set only when the caller can act on it: the admin Edge Functions
+// answer 403 with one of these when the session is not fresh enough for a
+// destructive action (supabase/functions/_shared/recentAuth.ts). The screen
+// then asks for the password or authenticator code and retries.
+export type ReauthCode = 'reauth_required' | 'mfa_required';
+export type AuthError = { message: string; code?: ReauthCode };
+
+// What the Account screen needs to start authenticator-app enrolment. The
+// secret and URI are shown to the user once and never stored or logged
+// (auth-js asks the same of its own callers).
+export type MfaEnrollment = { factorId: string; qrCode: string; secret: string; uri: string };
+
 
 // Shared transport for the admin-only Edge Functions. Both of them take a
 // bearer admin JWT and return either a JSON body or an error shape; the
@@ -33,12 +45,16 @@ async function callAdminFunction(name: string, body?: unknown): Promise<AuthErro
 
   if (!response.ok) {
     let detail = `Server returned ${response.status}.`;
+    let code: ReauthCode | undefined;
     try {
       const parsed = await response.json() as { message?: string; error?: string };
       if (parsed.message) detail = parsed.message;
       else if (parsed.error) detail = parsed.error;
+      if (response.status === 403 && (parsed.error === 'reauth_required' || parsed.error === 'mfa_required')) {
+        code = parsed.error;
+      }
     } catch { /* keep the status-line detail */ }
-    return { message: detail };
+    return code ? { message: detail, code } : { message: detail };
   }
 
   return null;
@@ -122,21 +138,29 @@ export const AuthService = {
       return { message: 'That code is invalid or has expired. Request a new one.' };
     }
 
-    const { error: updateError } = await supabase.auth.updateUser({ password: params.newPassword });
-    if (updateError) {
-      // verifyOtp already minted a session. Leaving it in place would hand the
-      // user a signed-in app whose password is still the old one — or, on the
-      // invite path, an account with no password at all that can never be
-      // signed into again. Drop it so the only way forward is a fresh code.
-      await supabase.auth.signOut().catch(() => { /* best effort */ });
-      console.warn('[auth] password update failed:', updateError.message);
-      // Passed through, not flattened: these are validation messages about the
-      // password the user just chose ("should be at least 6 characters"), and
-      // the user is already authenticated at this point.
-      return { message: updateError.message };
+    // An admin with two-step sign-in on is only at aal1 here, and GoTrue
+    // refuses a password change below aal2 for them (supabase/auth
+    // internal/api/user.go: "AAL2 session is required to update email or
+    // password when MFA is enabled"). Keep the session (the emailed code is
+    // already spent) and let the screen collect the authenticator code; the
+    // password is set by completePasswordResetWithMfa.
+    if (await mfa.needsMfaChallenge()) {
+      return {
+        message: 'Two-step sign-in is on for this account. Enter the 6-digit code from your authenticator app to finish.',
+        code: 'mfa_required',
+      };
     }
 
-    return null;
+    return setNewPassword(params.newPassword);
+  },
+
+  // Second half of a reset for an admin with two-step sign-in on: lift the
+  // session to aal2 with the authenticator code, then set the password. A
+  // wrong code keeps the session so they can retry without a new email.
+  async completePasswordResetWithMfa(params: { totp: string; newPassword: string }): Promise<AuthError | null> {
+    const mfaError = await mfa.verifyMfaCode(params.totp);
+    if (mfaError) return mfaError;
+    return setNewPassword(params.newPassword);
   },
 
   // Calls the delete-admin-account Edge Function, which validates the bearer
@@ -164,5 +188,49 @@ export const AuthService = {
   // response that stops them re-sending an invite that will never arrive.
   async inviteAdmin(email: string): Promise<AuthError | null> {
     return callAdminFunction('invite-admin', { email: email.trim().toLowerCase() });
-  }
+  },
+
+  // ─── Two-step sign-in (TOTP) — bodies in ./auth/mfa.ts ─────────────────
+  needsMfaChallenge: mfa.needsMfaChallenge,
+  hasVerifiedFactor: mfa.hasVerifiedFactor,
+  verifyMfaCode: mfa.verifyMfaCode,
+  startMfaEnrollment: mfa.startMfaEnrollment,
+  confirmMfaEnrollment: mfa.confirmMfaEnrollment,
+  disableMfa: mfa.disableMfa,
+
+  // Re-proves identity right before a destructive action (sudo mode). With
+  // two-step sign-in on, the authenticator code is the proof; otherwise the
+  // password, by signing in again as the same user, which gives the session a
+  // fresh `password` timestamp that the Edge Function checks.
+  async reauthenticate(proof: { password?: string; code?: string }): Promise<AuthError | null> {
+    if (proof.code !== undefined) return mfa.verifyMfaCode(proof.code);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const email = session?.user.email;
+    if (!email) return { message: 'You are not signed in.' };
+    const { error } = await supabase.auth.signInWithPassword({ email, password: proof.password ?? '' });
+    if (error) {
+      console.warn('[auth] re-authentication failed:', error.message);
+      return { message: 'That password is not correct.' };
+    }
+    return null;
+  },
 };
+
+// The last step of every email-code flow.
+async function setNewPassword(newPassword: string): Promise<AuthError | null> {
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) {
+    // verifyOtp already minted a session. Leaving it in place would hand the
+    // user a signed-in app whose password is still the old one — or, on the
+    // invite path, an account with no password at all that can never be
+    // signed into again. Drop it so the only way forward is a fresh code.
+    await supabase.auth.signOut().catch(() => { /* best effort */ });
+    console.warn('[auth] password update failed:', updateError.message);
+    // Passed through, not flattened: these are validation messages about the
+    // password the user just chose ("should be at least 6 characters"), and
+    // the user is already authenticated at this point.
+    return { message: updateError.message };
+  }
+  return null;
+}

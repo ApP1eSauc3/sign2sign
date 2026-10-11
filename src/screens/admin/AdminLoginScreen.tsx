@@ -43,6 +43,14 @@ export default function AdminLoginScreen({ navigation }: Props) {
       return;
     }
 
+    // Two-step sign-in: the password is accepted but the session is aal1, and
+    // the database refuses it until the code is entered (migration 018). Stay
+    // AdminPending until MfaChallengeScreen promotes it.
+    if (await AuthService.needsMfaChallenge()) {
+      navigation.replace('MfaChallenge');
+      return;
+    }
+
     setMode(AppMode.AdminAuthenticated);
     navigation.replace('AdminDashboard');
   }

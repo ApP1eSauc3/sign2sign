@@ -20,6 +20,9 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { TextInputField } from '../components/TextInputField';
 import { isLikelyEmail } from '../../utils/email';
 import { styles } from './account/styles';
+import { TwoStepSection } from './account/TwoStepSection';
+import { ReauthPrompt } from './account/ReauthPrompt';
+import { ReauthKind, reauthKindFor } from './account/twoStep.logic';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'Account'>;
 
@@ -42,11 +45,29 @@ export default function AccountScreen({ navigation }: Props) {
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
   const [isInviting, setIsInviting] = useState(false);
 
+  const [hasMfa, setHasMfa] = useState<boolean | null>(null);
+  // Set when invite-admin / delete-admin-account answered "confirm it's you"
+  // (sudo mode). The prompt replaces that action's button until resolved.
+  const [reauth, setReauth] = useState<{ kind: ReauthKind; message: string; action: 'invite' | 'delete' } | null>(null);
+
   useEffect(() => {
     AuthService.getSession().then((session) => {
       setEmail(session?.user.email ?? null);
     });
+    AuthService.hasVerifiedFactor().then(setHasMfa);
   }, []);
+
+  // Re-proves identity, then re-runs the action that was refused.
+  async function confirmReauth(value: string): Promise<string | null> {
+    if (!reauth) return null;
+    const err = await AuthService.reauthenticate(reauth.kind === 'code' ? { code: value } : { password: value });
+    if (err) return err.message;
+    const action = reauth.action;
+    setReauth(null);
+    if (action === 'invite') await handleInvite();
+    else await handleConfirmDelete();
+    return null;
+  }
 
   async function handleInvite() {
     if (isInviting) return;
@@ -65,6 +86,10 @@ export default function AccountScreen({ navigation }: Props) {
     const err = await AuthService.inviteAdmin(target);
     setIsInviting(false);
 
+    if (err?.code) {
+      setReauth({ kind: reauthKindFor(!!hasMfa, err.code), message: err.message, action: 'invite' });
+      return;
+    }
     if (err) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setInviteError(err.message);
@@ -92,6 +117,10 @@ export default function AccountScreen({ navigation }: Props) {
     setIsDeleting(true);
     const err = await AuthService.deleteAccount();
     setIsDeleting(false);
+    if (err?.code) {
+      setReauth({ kind: reauthKindFor(!!hasMfa, err.code), message: err.message, action: 'delete' });
+      return;
+    }
     if (err) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Could not delete account', err.message);
@@ -119,6 +148,9 @@ export default function AccountScreen({ navigation }: Props) {
         <AdminCard>
           <Text style={styles.emailValue}>{email ?? '—'}</Text>
         </AdminCard>
+
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>SECURITY</Text>
+        <TwoStepSection enabled={hasMfa} onChanged={setHasMfa} />
 
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>PRIVACY</Text>
         <AdminCard>
@@ -162,14 +194,18 @@ export default function AccountScreen({ navigation }: Props) {
 
           {inviteNotice && <Text style={styles.inviteNotice}>{inviteNotice}</Text>}
 
-          <PrimaryButton
-            label="Send invite"
-            size="admin"
-            disabled={isInviting}
-            loading={isInviting}
-            onPress={handleInvite}
-            style={{ marginTop: 4 }}
-          />
+          {reauth?.action === 'invite' ? (
+            <ReauthPrompt kind={reauth.kind} message={reauth.message} onConfirm={confirmReauth} onCancel={() => setReauth(null)} />
+          ) : (
+            <PrimaryButton
+              label="Send invite"
+              size="admin"
+              disabled={isInviting}
+              loading={isInviting}
+              onPress={handleInvite}
+              style={{ marginTop: 4 }}
+            />
+          )}
         </AdminCard>
 
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>DANGER ZONE</Text>
@@ -194,7 +230,9 @@ export default function AccountScreen({ navigation }: Props) {
             second admin above first, and check with your team.
           </Text>
 
-          {!confirmArmed ? (
+          {reauth?.action === 'delete' ? (
+            <ReauthPrompt kind={reauth.kind} message={reauth.message} onConfirm={confirmReauth} onCancel={() => { setReauth(null); setConfirmArmed(false); }} />
+          ) : !confirmArmed ? (
             <PrimaryButton
               label="Delete account…"
               variant="outlineDestructive"
