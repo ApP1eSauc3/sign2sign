@@ -1,7 +1,7 @@
 # Sign2Sign — Privacy Policy
 
 **Effective date:** 2026-05-31
-**Last updated:** 2026-06-10
+**Last updated:** 2026-10-11
 
 This policy explains what data the Sign2Sign mobile app and Electron admin
 app ("Sign2Sign", "the app") collect, why, how it is stored, and what your
@@ -38,6 +38,8 @@ advertising SDK, and no third-party tracking in the app (verified against
 | Data | Why we need it | Where it lives |
 |---|---|---|
 | Email address + password | Sign in to the admin console | Supabase Auth |
+| Authenticator-app secret (only if you turn on two-step sign-in) | Ask for a 6-digit code at sign-in as well as your password | Supabase Auth |
+| Security log: each sign-in, admin invite, account deletion, job deletion and driver-code creation, with your user ID and email, plus your IP address for invites and deletions | Detect and investigate misuse of admin accounts | Supabase Postgres (`security_events`) |
 | Google OAuth token (only if you connect Google Sheets) | Import jobs from a Sheet you own | Device SecureStore — never leaves your device |
 | Routes, codes, and job imports you create | Operate the service | Supabase Postgres |
 
@@ -49,11 +51,12 @@ advertising SDK, and no third-party tracking in the app (verified against
 | Job photos (camera) | Evidence the work was completed | Supabase Storage (bucket `job-photos`) |
 | GPS latitude/longitude at the moment a photo is taken | Verify the photo was taken at the work site | Stored on the job record (`photo_gps_lat`, `photo_gps_lng`) |
 | Anonymous device ID (random UUID) | Per-device rate limit on code-validation attempts | Device SecureStore + sent with each code attempt |
+| Network IP address of each code attempt | Per-network rate limit on code-validation attempts, so codes cannot be guessed by switching device IDs; repeated lockouts are recorded in the security log | Supabase Postgres (`code_attempts`, and `security_events` for lockouts) |
 
 We do **not** collect: continuous location tracking, contacts, microphone
 audio, advertising identifiers, device fingerprints, or any data not
-listed above. The Android `RECORD_AUDIO` permission is declared by an
-Expo dependency but is not exercised by Sign2Sign code.
+listed above. The app does not request microphone access on any
+platform.
 
 ### From a Google Sheet you import
 
@@ -94,10 +97,11 @@ display time, only for authorised viewers.
 | Google LLC | Sheets API (only if an admin chooses to import from Google Sheets) | Google global infrastructure | The Sheet you authorise; OAuth token stays on your device |
 | Apple Inc. | App Store distribution, push receipt of crash logs you opt to share | Apple global infrastructure | App metadata; crash logs only if you opt in via iOS Settings |
 
-If you complete a job, the app opens your default mail client with a
-prefilled message addressed to the agent email on the job. The message
-content and recipient are then handled by your mail provider under their
-own privacy terms.
+Drivers never email anyone from the app. When a job is complete, an
+admin reviews it and, on approving it, the app opens the admin's own
+mail client with a prefilled message addressed to the agent email on the
+job. The message and its recipient are then handled by that mail
+provider under its own privacy terms.
 
 ---
 
@@ -116,7 +120,8 @@ your data is transferred internationally to that region.
 | Admin accounts | Until the admin deletes the account in-app (see §7) or we are instructed to delete it |
 | Daily route codes | Become unusable at 06:00 the morning after they are issued (with a short technical grace period for syncing work completed offline). The code record itself is retained with the job history it belongs to |
 | Job records and photos | Retained as the customer's (sign2site.com.au) completion records for as long as the customer requires them; deleted on the customer's instruction or on a verified request (see §7) |
-| Code-attempt logs (anonymous device ID + timestamp) | Deleted from the server automatically after 24 hours |
+| Code-attempt logs (anonymous device ID, network IP address + timestamp) | Deleted from the server automatically by a nightly job once older than 24 hours, so kept for at most about 48 hours |
+| Security log (sign-ins, invites, deletions, driver lockouts) | Deleted automatically by a nightly job once older than one year |
 | Anonymous driver device ID | Stored on the device; cleared when the app is uninstalled |
 | Google OAuth tokens | Stored only on the admin's device; revoked when you disconnect or uninstall |
 
@@ -158,11 +163,16 @@ data from children.
 - All network traffic uses HTTPS.
 - Admin passwords are handled by Supabase Auth (bcrypt-hashed, never
   stored in our database in plain text).
-- The driver code path is rate-limited at the edge function (per-IP) and
-  at the database (per-device); successive incorrect codes are locked
-  out.
+- The driver code path is rate-limited in the database per device and per
+  network; successive incorrect codes are locked out.
+- Admins can turn on two-step sign-in (a code from an authenticator app).
+  Once on, the database refuses that admin's session until the code is
+  entered.
+- Deleting an account or inviting an admin requires entering your password
+  (or authenticator code) again, even when already signed in.
+- Admin sessions end after 30 days, or after 24 hours without use.
 - The Supabase service-role key never ships in the app. It exists only
-  in the server-side edge function.
+  in server-side edge functions.
 - Photo storage uses private buckets with row-level security policies;
   URLs to images are short-lived signed URLs generated at display time.
 
@@ -175,8 +185,7 @@ it publicly.
 ## 10. Changes to this policy
 
 If we make a material change to this policy, we will update the
-"Last updated" date above and, for admins, surface a notice the next
-time they sign in. The current version of this policy is always
+"Last updated" date above. The current version of this policy is always
 available at the URL listed on the App Store page.
 
 ---

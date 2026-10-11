@@ -34,7 +34,7 @@ then for each "Collected" type answer the four follow-up questions
 | **Contact info → Email address** *(second entry for agent_email — Apple allows separate purpose mapping)* | ✅ Yes (agents) | ✅ Linked | ❌ No | App Functionality | Agent email imported from a Google Sheet by an admin; pre-fills the completion mailto on job completion. `JobPhotoService.ts` + `GoogleSheetsService.ts:agent_email`. |
 | Contact info → Name, phone, address, other user contact info | ❌ Not collected | — | — | — | — |
 | **User content → Photos or videos** | ✅ Yes | ✅ Linked | ❌ No | App Functionality | Camera photo per job; mandatory before "Mark complete". `JobPhotoService.ts:capturePhoto` → `uploadPhoto`. |
-| User content → Audio data | ❌ Not collected | — | — | — | Android `RECORD_AUDIO` permission is declared by an Expo dependency but not exercised by Sign2Sign code (verified by `grep` 2026-05-31). |
+| User content → Audio data | ❌ Not collected | — | — | — | No microphone permission on either platform: `RECORD_AUDIO` is blocked (`app.json` → `expo-image-picker` `microphonePermission: false`) and there is no `NSMicrophoneUsageDescription` (verified with `npx expo config --type introspect`, 2026-10-11). |
 | User content → Customer support, other user content | ❌ Not collected | — | — | — | — |
 | **Location → Precise location** | ✅ Yes | ✅ Linked | ❌ No | App Functionality | Single GPS fix at the moment of photo upload; no background or continuous tracking. `DriverJobScreen.tsx → Location.getCurrentPositionAsync`. |
 | Location → Coarse location | ❌ Not collected | — | — | — | Coarse permission is requested on Android only so the OS can downgrade if the user denies fine; the app reads `getCurrentPositionAsync` with Balanced accuracy. |
@@ -131,6 +131,21 @@ The GitHub Pages copy can stay live as a redundant mirror — no harm.
       sign-in wall.
 - [ ] In App Store Connect, paste the URL into **App Privacy → Privacy
       Policy** and the build's metadata.
+- [ ] **IP addresses (since migrations 016/017, answered 2026-10-11).**
+      The server stores IP addresses for driver code attempts (~48h) and on
+      admin invite/delete and driver-lockout security events (1 year).
+      Apple: "You collect and store IP address from your users. Declare the
+      relevant data types based on how you use IP address, such as precise
+      location, coarse location, device ID, or diagnostics"
+      (developer.apple.com/app-store/app-privacy-details, read 2026-10-11).
+      Ours is used only as an identifier for rate limiting and security, so it
+      belongs under **Identifiers → Device ID**, purpose **App Functionality**
+      (fraud prevention/security), not tracking. Device ID is already
+      declared, but as **Not linked**; the admin security events tie the IP
+      to the admin's user ID, so answer **Linked** for it. ⚠️ `app.json`
+      `privacyManifests` still says `NSPrivacyCollectedDataTypeDeviceID`
+      linked `false`. That file is Human-owned, so flip it to `true` (and
+      update the §2 row) when these migrations go live.
 - [ ] Walk the App Privacy questionnaire using the table in §2 above.
 - [ ] Save & Publish.
 
