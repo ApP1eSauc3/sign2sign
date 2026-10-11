@@ -21,19 +21,78 @@ export interface SetPasswordInput {
   confirmPassword: string;
 }
 
-// GoTrue emails a six-digit {{ .Token }}.
-const CODE_PATTERN = /^\d{6}$/;
+// GoTrue emails a numeric {{ .Token }} whose length is a project setting,
+// `mailer_otp_length`, not a constant. Supabase allows 6–10, and this project
+// was read at 8 on 2026-10-10 (`npm run auth:audit`). The original /^\d{6}$/
+// meant no real code could ever pass. Accepting the whole range keeps the
+// screen correct if the setting changes, and the server stays the real check:
+// a wrong-length code is still refused by verifyOtp.
+export const CODE_MIN_LENGTH = 6;
+export const CODE_MAX_LENGTH = 10;
+const CODE_PATTERN = new RegExp(`^\\d{${CODE_MIN_LENGTH},${CODE_MAX_LENGTH}}$`);
 
-// NIST SP 800-63B §5.1.1.2 sets 8 characters as the floor for a user-chosen
-// secret and explicitly advises against composition rules (mandatory symbols,
-// mixed case), which push users toward predictable substitutions. Length is
-// the only rule here for that reason.
+// These rules MIRROR the project's live GoTrue password policy. They do not
+// set it. Read with `npm run auth:audit` on 2026-10-10:
+//   password_min_length          12
+//   password_required_characters (the raw string below)
+//   password_hibp_enabled        true  (cannot be mirrored: server only)
 //
-// This is stricter than the GoTrue default of 6 on purpose: if the project's
-// own minimum is ever raised in the dashboard, the server rejects and its
-// message is passed through — this constant only ever fails input early, it
-// can never let through something the server would refuse for being short.
-export const MIN_PASSWORD_LENGTH = 8;
+// Decision (Liam, 2026-10-10): keep the server's policy, composition rules
+// included, and match it here. NIST SP 800-63B advises against composition
+// rules, and that trade-off was weighed and declined. Do not "fix" this back
+// to length-only while the server still enforces composition.
+//
+// Why the client checks at all: verifyOtp spends the emailed code BEFORE
+// updateUser applies the policy, so a password the server will refuse costs
+// the user their code, and a new one is capped at 2 emails an hour. This
+// check only ever fails input early. HIBP and any future server rule still
+// reject at updateUser, and that message is shown to the user.
+//
+// If the policy changes in the dashboard, re-run `npm run auth:audit` and
+// paste the new values here. The tests pin both.
+export const MIN_PASSWORD_LENGTH = 12;
+
+// Copied verbatim from the config (JSON-unescaped). Colons separate the
+// classes, and a backslash before a colon makes that colon literal.
+export const PASSWORD_REQUIRED_CHARACTERS =
+  'abcdefghijklmnopqrstuvwxyz:ABCDEFGHIJKLMNOPQRSTUVWXYZ:0123456789:' +
+  '!@#$%^&*()_+-=[]{};\'\\\\:"|<>?,./`~';
+
+// A port of GoTrue's PasswordRequiredCharacters.Decode
+// (supabase/auth internal/conf/configuration.go, read 2026-10-10). It is
+// ported rather than hand-split because the symbol class contains a literal
+// "\" and ":", which are exactly the characters a by-eye split gets wrong.
+export function parseRequiredCharacters(value: string): string[] {
+  const parts = value.split(':');
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const part = parts[i];
+    if (part === '') continue;
+    if (part.endsWith('\\')) {
+      parts[i] = part.slice(0, -1) + ':' + parts[i + 1];
+      parts[i + 1] = '';
+    }
+  }
+  return parts.filter((part) => part !== '');
+}
+
+const REQUIRED_CLASSES = parseRequiredCharacters(PASSWORD_REQUIRED_CHARACTERS);
+
+// Index-aligned with REQUIRED_CLASSES, for a message that names what is
+// missing rather than reciting the server's character lists.
+const CLASS_NAMES = ['a lowercase letter', 'an uppercase letter', 'a number', 'a symbol'];
+
+// Every class needs at least one character from its own set, exactly as GoTrue
+// checks it. A space, "£" or "é" is NOT a symbol here, so the client must not
+// treat one as a symbol either.
+export function missingCharacterClasses(password: string): string[] {
+  const chars = [...password];
+  return REQUIRED_CLASSES
+    .map((set, i) => (chars.some((c) => set.includes(c)) ? null : CLASS_NAMES[i] ?? `one of ${set}`))
+    .filter((name): name is string => name !== null);
+}
+
+export const PASSWORD_RULE_HINT =
+  `Passwords need at least ${MIN_PASSWORD_LENGTH} characters, with upper and lower case, a number and a symbol.`;
 
 export function validateSetPassword(input: SetPasswordInput): SetPasswordValidation {
   const email = input.email.trim();
@@ -44,10 +103,10 @@ export function validateSetPassword(input: SetPasswordInput): SetPasswordValidat
     return { ok: false, field: 'email', message: 'That does not look like an email address.' };
   }
 
-  // Trimmed before testing: the six digits are usually pasted or copied out of
+  // Trimmed before testing: the code is usually pasted or copied out of
   // a mail client, which very often brings a trailing space with them.
   if (!CODE_PATTERN.test(input.code.trim())) {
-    return { ok: false, field: 'code', message: 'The code is the 6 digits from the email.' };
+    return { ok: false, field: 'code', message: 'Enter the code from the email — digits only.' };
   }
 
   // Never trimmed. A leading or trailing space is a legitimate character in a
@@ -59,6 +118,14 @@ export function validateSetPassword(input: SetPasswordInput): SetPasswordValidat
       ok: false,
       field: 'password',
       message: `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
+    };
+  }
+  const missing = missingCharacterClasses(input.password);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      field: 'password',
+      message: `Add ${missing.join(', ')}.`,
     };
   }
   if (input.password !== input.confirmPassword) {

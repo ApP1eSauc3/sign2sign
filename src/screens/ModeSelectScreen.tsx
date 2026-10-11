@@ -22,13 +22,11 @@ export default function ModeSelectScreen() {
         <Text style={styles.cardTitle}>Who are you?</Text>
 
         {/* Admin — brand blue, leads into the admin (light) world.
-            NOTE: Mode is set to AdminAuthenticated here so AppNavigator renders
-            AdminStack. AdminStack always starts at AdminLogin — auth hasn't
-            actually happened yet at this point. If AppMode semantics are tightened
-            in future, add an AdminPending mode and gate dashboard access on it. */}
+            AdminPending, not AdminAuthenticated: no sign-in has happened yet.
+            AdminLoginScreen and SetPasswordScreen promote it on success. */}
         <TouchableOpacity
           style={[styles.button, styles.buttonAdmin]}
-          onPress={() => setMode(AppMode.AdminAuthenticated)}
+          onPress={() => setMode(AppMode.AdminPending)}
           activeOpacity={0.85}
         >
           <Text style={styles.buttonAdminText}>Admin</Text>

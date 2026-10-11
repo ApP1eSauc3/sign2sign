@@ -5,9 +5,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AdminStackParamList } from '../../navigation/AdminStack';
 import { AuthService } from '../../services/AuthService';
+import { useAppStore } from '../../stores/useAppStore';
+import { AppMode } from '../../data/SignJob';
 import { TextInputField } from '../components/TextInputField';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { validateSetPassword, SetPasswordField } from './setPassword/logic';
+import {
+  validateSetPassword,
+  SetPasswordField,
+  CODE_MAX_LENGTH,
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_RULE_HINT,
+} from './setPassword/logic';
 import { styles } from './setPassword/styles';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'SetPassword'>;
@@ -21,13 +29,14 @@ type Props = NativeStackScreenProps<AdminStackParamList, 'SetPassword'>;
 //                them (invite-admin Edge Function). Starts at 'enter'; there
 //                is nothing for this screen to request.
 //
-// Neither flow follows the link in the email. Both read the six-digit
+// Neither flow follows the link in the email. Both read the numeric
 // {{ .Token }} out of it — see AuthService.completePasswordReset for why.
 type Phase = 'request' | 'enter';
 
 export default function SetPasswordScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { flow } = route.params;
+  const setMode = useAppStore((s) => s.setMode);
 
   const [phase, setPhase] = useState<Phase>(flow === 'invite' ? 'enter' : 'request');
   const [email, setEmail] = useState(route.params.email ?? '');
@@ -62,7 +71,7 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
     // us, and the wording below is careful to promise nothing more.
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setNotice(
-      `If ${trimmed} has an admin account, a 6-digit code is on its way. ` +
+      `If ${trimmed} has an admin account, a code is on its way. ` +
       'Codes expire — if yours stops working, request another.'
     );
     setPhase('enter');
@@ -97,6 +106,7 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
     // completePasswordReset leaves a live session behind (verifyOtp mints one),
     // so the dashboard is reachable directly — no trip back through login.
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setMode(AppMode.AdminAuthenticated);
     navigation.replace('AdminDashboard');
   }
 
@@ -119,10 +129,10 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
         </Text>
         <Text style={styles.formIntro}>
           {isInvite
-            ? 'Enter the 6-digit code from your invite email, then choose a password.'
+            ? `Enter the code from your invite email, then choose a password. ${PASSWORD_RULE_HINT}`
             : phase === 'request'
-              ? "Enter your admin email and we'll send you a 6-digit code."
-              : 'Enter the 6-digit code from the email, then choose a new password.'}
+              ? "Enter your admin email and we'll send you a code."
+              : `Enter the code from the email, then choose a new password. ${PASSWORD_RULE_HINT}`}
         </Text>
 
         {notice && (
@@ -149,16 +159,16 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
         {phase === 'enter' && (
           <>
             <TextInputField
-              label="6-digit code"
-              placeholder="123456"
+              label="Code from the email"
+              placeholder="12345678"
               keyboardType="number-pad"
-              maxLength={6}
+              maxLength={CODE_MAX_LENGTH}
               returnKeyType="next"
               // oneTimeCode surfaces the code in the iOS keyboard's QuickType bar
               // straight from the mail notification, so it never has to be typed.
               textContentType="oneTimeCode"
               autoComplete="one-time-code"
-              accessibilityLabel="Six digit code from the email"
+              accessibilityLabel="Code from the email"
               value={code}
               onChangeText={setCode}
               error={errorFor('code')}
@@ -166,7 +176,7 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
 
             <TextInputField
               label="New password"
-              placeholder="At least 8 characters"
+              placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
               secureTextEntry
               returnKeyType="next"
               // newPassword (not `password`) is what tells the iOS keychain and

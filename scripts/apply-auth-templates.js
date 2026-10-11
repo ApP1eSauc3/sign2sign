@@ -3,7 +3,7 @@
 //
 // This is the step that makes the password-reset and admin-invite flows work
 // at all: the stock Supabase templates carry only {{ .ConfirmationURL }}, and
-// the app reads a six-digit {{ .Token }} instead.
+// the app reads the numeric {{ .Token }} instead.
 //
 //   export SUPABASE_ACCESS_TOKEN=sbp_…
 //   node scripts/auth-config-audit.js            # read + back up first

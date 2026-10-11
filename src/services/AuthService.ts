@@ -84,7 +84,7 @@ export const AuthService = {
   // message and waits for a code that was never sent. Accepted — retrying is
   // cheap, and the console line below is the trail for anyone debugging it.
   //
-  // No `redirectTo` is passed. The reset is completed in-app with the six-digit
+  // No `redirectTo` is passed. The reset is completed in-app with the numeric
   // {{ .Token }} from the email, never by following the link, so there is no
   // redirect URL to allowlist and no deep-link handler to maintain.
   async requestPasswordReset(email: string): Promise<void> {
@@ -92,7 +92,7 @@ export const AuthService = {
     if (error) console.warn('[auth] password reset request failed:', error.message);
   },
 
-  // Second half of both email-code flows: exchange the six-digit code for a
+  // Second half of both email-code flows: exchange the emailed code for a
   // session, then set the password on it.
   //
   // `type` selects which flow. They are the same two API calls in the same

@@ -75,7 +75,7 @@ export default function AccountScreen({ navigation }: Props) {
     setInviteEmail('');
     setInviteNotice(
       `Invite sent to ${target}. They finish setting up by tapping ` +
-      '"I have an invite code" on the login screen and entering the 6-digit ' +
+      '"I have an invite code" on the login screen and entering the ' +
       'code from their email.'
     );
   }
@@ -140,7 +140,7 @@ export default function AccountScreen({ navigation }: Props) {
           <Text style={styles.inviteTitle}>Invite an admin</Text>
           <Text style={styles.inviteBody}>
             Public sign-up is disabled, so this is the only way to add
-            another admin. They get an email with a 6-digit code and choose
+            another admin. They get an email with a code and choose
             their own password — you never see or set it.
           </Text>
 

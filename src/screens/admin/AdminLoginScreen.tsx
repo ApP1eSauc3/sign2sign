@@ -43,6 +43,7 @@ export default function AdminLoginScreen({ navigation }: Props) {
       return;
     }
 
+    setMode(AppMode.AdminAuthenticated);
     navigation.replace('AdminDashboard');
   }
 

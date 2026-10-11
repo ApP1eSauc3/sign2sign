@@ -3,7 +3,7 @@
 // Public sign-up is disabled on this project, so there is no self-serve path
 // to a second admin account. This function is that path: an existing admin
 // invites a colleague by email, and GoTrue sends them an invite containing a
-// six-digit OTP which SetPasswordScreen exchanges for a password.
+// numeric OTP (6–10 digits, per mailer_otp_length) which SetPasswordScreen exchanges for a password.
 //
 // Flow:
 //   1. Client sends `Authorization: Bearer <admin access_token>` and a JSON

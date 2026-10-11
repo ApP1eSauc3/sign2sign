@@ -41,6 +41,11 @@ export interface DriverSession {
 
 export enum AppMode {
   Undecided = 'undecided',
+  // On the admin side but not signed in: login, forgot-password and invite
+  // screens. Separate from AdminAuthenticated so that losing a session here,
+  // such as SetPasswordScreen's deliberate sign-out after a refused password,
+  // does not eject the user to mode select before the error can be shown.
+  AdminPending = 'admin_pending',
   AdminAuthenticated = 'admin',
   DriverActive = 'driver',
 }

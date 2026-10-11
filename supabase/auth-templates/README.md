@@ -8,7 +8,7 @@ These two templates are the **blocking dependency** for both email-code flows
 
 The stock Supabase Recovery and Invite templates carry only
 `{{ .ConfirmationURL }}`. The app never follows that link — it reads the
-six-digit `{{ .Token }}` — so both templates must be replaced. Keeping them
+numeric `{{ .Token }}` (length set by `mailer_otp_length`; 8 as of 2026-10-10) — so both templates must be replaced. Keeping them
 here rather than only in the dashboard means they are reviewable, diffable,
 and re-appliable after any project restore.
 
