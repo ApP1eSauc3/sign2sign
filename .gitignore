@@ -7,6 +7,9 @@ node_modules/
 .expo/
 dist/
 web-build/
+
+# electron-builder output (DMGs, zips, latest-mac.yml)
+release/
 expo-env.d.ts
 
 # Native

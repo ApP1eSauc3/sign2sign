@@ -31,6 +31,10 @@ mac:
   icon: assets/icon.png
   hardenedRuntime: true
   gatekeeperAssess: false
+  # Electron 44 requires macOS 13 (Ventura) or later. Sets LSMinimumSystemVersion.
+  # build/stampUpdateMinimumOs.js mirrors this into latest-mac.yml (as a Darwin
+  # version) so older Macs are not auto-updated onto a build they cannot run.
+  minimumSystemVersion: "13.0"
   # entitlements and entitlementsInherit are required for notarization
   entitlements: electron/entitlements.mac.plist
   entitlementsInherit: electron/entitlements.mac.plist

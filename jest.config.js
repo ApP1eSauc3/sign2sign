@@ -14,8 +14,10 @@ process.env.TZ = 'Australia/Perth';
 /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: 'node',
-  roots: ['<rootDir>/src'],
-  testMatch: ['**/__tests__/**/*.test.ts'],
+  // scripts/ holds plain-CommonJS repo tooling (e.g. the CI audit gate);
+  // its tests are .js and run untransformed.
+  roots: ['<rootDir>/src', '<rootDir>/scripts'],
+  testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.js'],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',

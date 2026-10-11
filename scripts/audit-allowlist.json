@@ -1,0 +1,14 @@
+[
+  {
+    "id": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "reason": "Stack-exhaustion DoS from a hostile glob pattern. Reached only through micromatch inside Jest and Metro, which match this repo's own file patterns at build/test time; no untrusted input reaches it and it is not in the app bundle. 3.0.3 is the latest release, so no fixed version exists (checked 2026-10-11).",
+    "reviewBy": "2027-01-11"
+  },
+  {
+    "id": "GHSA-86w9-cpqp-85rv",
+    "package": "node-forge",
+    "reason": "RSA PKCS#1 v1.5 signature verification flaw. Reached only through @expo/code-signing-certificates inside the Expo CLI, used for EAS Update code signing, which this project does not use (no expo-updates dependency). Not in the app bundle. 1.4.0 is the latest release, so no fixed version exists (checked 2026-10-11).",
+    "reviewBy": "2027-01-11"
+  }
+]

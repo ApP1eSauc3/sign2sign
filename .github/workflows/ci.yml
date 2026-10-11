@@ -26,12 +26,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       # npm ci, not npm install — installs exactly the committed lockfile.
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
+      # Replays supabase/migrations into PGlite (Postgres 17 in WASM) and
+      # checks grants/RLS as the API roles: the driver photo write (#12),
+      # the security log, the IP throttle and MFA enforcement.
+      - run: npm run test:migrations
 
   audit:
     name: Dependency audit
@@ -40,15 +44,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
-      # Fails the job on high/critical. As of 2026-08-18 this repo does NOT
-      # pass — see the audit doc: most findings are build tooling that never
-      # ships, and the one that reaches a shipped artifact is
-      # electron-updater -> builder-util-runtime. Triage that first; until
-      # then this job is the visible reminder, which is the point.
-      - run: npm audit --audit-level=high
+      # Fails on any high/critical advisory not triaged in
+      # scripts/audit-allowlist.json, or whose triage is past its reviewBy
+      # date. It replaced a bare `npm audit --audit-level=high` on 2026-10-11:
+      # that job failed on every run because of build-tool advisories, so it
+      # was always red and a new, real advisory would not have stood out.
+      - run: npm run audit:gate
 
   electron:
     name: Electron shell syntax
@@ -57,6 +61,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      # No install needed — this is a syntax check on the two shell files.
+          node-version: 22
+      # No install needed — a syntax check on the Electron shell and its build hooks.
       - run: npm run verify:electron
+
+  functions:
+    name: Edge Functions (Deno)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # Type-checks every function (and the _shared modules they import), then
+      # runs the shared unit tests: recent-auth, client IP, security events.
+      - run: deno check supabase/functions/*/index.ts
+      - run: deno test supabase/functions/_shared/
