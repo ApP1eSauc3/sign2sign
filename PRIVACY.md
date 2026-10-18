@@ -18,7 +18,7 @@
   - Google Maps Platform: geocode-address (admin import) + optimize-route (job-site
     coordinates only, never the driver's position)
   - Driver position on the map: DriverMapScreen showsUserLocation (on device only)
-  - Mac updates: electron-updater -> GitHub releases (electron-builder.yml publish)
+  - Desktop (Mac + Windows) updates: electron-updater -> GitHub releases (electron-builder.yml publish)
 -->
 
 # Sign2Site App Privacy Policy
@@ -26,7 +26,7 @@
 **Effective date:** 31 May 2026
 **Last updated:** 11 October 2026
 
-The Sign2Site app is the job-management app used by Sign2Site and its installation crews to plan sign installations and removals and to record proof that each job was completed. It is available as an iPhone app and as a desktop app for Mac.
+The Sign2Site app is the job-management app used by Sign2Site and its installation crews to plan sign installations and removals and to record proof that each job was completed. It is available as an iPhone app and as a desktop app for Mac and Windows.
 
 This policy explains what information the app collects, why we collect it, where it is kept, who else handles it on our behalf, how long we keep it, and the rights you have.
 
@@ -110,7 +110,7 @@ We use the following providers to run the app. Each handles only the information
 | Resend, Inc. | Sends password-reset and invitation emails | Amazon Web Services, Tokyo, Japan | The recipient's email address and the email's content |
 | Google LLC | Converts site addresses into map coordinates, works out the best order to visit job sites, and (if an admin connects it) reads the chosen Google Sheet | Google's global infrastructure | Site addresses; the coordinates of the day's job sites (never the driver's own location); the Google Sheet the admin chooses |
 | Apple Inc. | Distributes the iPhone app, provides the map shown on iPhone, and (if you choose to share them) crash reports | Apple's global infrastructure | Map requests for the area on screen; crash reports only if you opt in through your iPhone's settings |
-| GitHub, Inc. | Hosts the Mac app's downloads and update checks | GitHub's global infrastructure | Your network (IP) address and the app version when the Mac app checks for an update |
+| GitHub, Inc. | Hosts the desktop app's downloads and update checks | GitHub's global infrastructure | Your network (IP) address and the app version when the desktop app checks for an update |
 
 ---
 

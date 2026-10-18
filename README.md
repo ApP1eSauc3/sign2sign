@@ -32,7 +32,7 @@ Sign2Sign solves a coordination problem for sign installation companies: crews n
 | Role | Platform | Auth method |
 |---|---|---|
 | Driver | iOS (Expo Go / standalone) | 6-digit daily code — no account required |
-| Admin | iOS + desktop (Electron — macOS shipped in v1.0.0; Windows deferred until a code-signing cert exists) | Email/password via Supabase Auth |
+| Admin | iOS + desktop (Electron — macOS shipped in v1.0.0; Windows required by the client, in progress: needs code signing, see `docs/WINDOWS_CODE_SIGNING_2026_10_18.md`) | Email/password via Supabase Auth |
 
 Key constraints driving every architectural decision:
 - Drivers may have poor connectivity mid-route — offline queue handles this
@@ -405,7 +405,7 @@ eas build --platform ios
 
 ```bash
 npm run electron:build:mac   # macOS — exports web, packages, signs, notarizes, staples
-npm run electron:build:win   # Windows — configured but DEFERRED: no code-signing cert yet
+npm run electron:build:win   # Windows — runs on Windows only; releases are built and signed by .github/workflows/windows.yml
 ```
 
 Admin on iOS and admin on desktop run identical React code — only the shell differs.
