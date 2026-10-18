@@ -64,6 +64,11 @@ dmg:
     height: 380
 
 # ─── Windows ──────────────────────────────────────────────────────────────────
+# Built and signed on GitHub Actions (.github/workflows/windows.yml): signing
+# uses Microsoft's TrustedSigning PowerShell module, which needs Windows.
+# Signing settings are passed by that workflow as --config.win.azureSignOptions.*
+# overrides, so a build with no Azure account configured comes out unsigned
+# (fine for testing, never for release). See docs/WINDOWS_CODE_SIGNING_2026_10_18.md.
 win:
   icon: assets/icon.png
   target:
@@ -71,6 +76,10 @@ win:
       arch: [x64]
 
 nsis:
+  # Same reason as mac.artifactName: the default "Sign2Site Admin Setup 1.0.0.exe"
+  # has spaces, which GitHub Releases turns into dots while latest.yml keeps
+  # them, and the Windows auto-updater 404s.
+  artifactName: Sign2Site-Admin-Setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

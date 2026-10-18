@@ -1,0 +1,186 @@
+# Sign2Site — Windows desktop app
+#
+# Builds the Windows installer, signs it when the Azure Artifact Signing account
+# is configured, and smoke-tests the installed app on a real Windows machine
+# (build/windows-smoke-test.ps1). Runs here because signing needs Windows and
+# the developer has none. See docs/WINDOWS_CODE_SIGNING_2026_10_18.md.
+#
+# - Push / pull request touching the desktop shell: unsigned test build with
+#   placeholder Supabase settings (the app reaches its first screen but cannot
+#   sign in). Proves the shell, installer and link handler work on Windows.
+# - Manual run with a release tag: real settings, signed, verified, smoke-tested,
+#   then attached to that existing GitHub release next to the Mac files.
+#
+# Secrets (Settings → Secrets and variables → Actions → Secrets):
+#   EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY,
+#   EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB             same values as .env.local
+#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+#                                                the signing-only app registration
+# Variables (same page → Variables):
+#   AZURE_SIGNING_ENDPOINT    e.g. https://jpe.codesigning.azure.net/
+#   AZURE_SIGNING_ACCOUNT     Artifact Signing account name
+#   AZURE_SIGNING_PROFILE     Public Trust certificate profile name
+#   WIN_PUBLISHER_NAME        the certificate's CN, e.g. Sign2Site Pty Ltd
+
+name: Windows
+
+on:
+  push:
+    paths:
+      - electron/**
+      - build/**
+      - electron-builder.yml
+      - package.json
+      - package-lock.json
+      - .github/workflows/windows.yml
+  pull_request:
+    paths:
+      - electron/**
+      - build/**
+      - electron-builder.yml
+      - package.json
+      - package-lock.json
+      - .github/workflows/windows.yml
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release to attach the signed installer to (e.g. v1.0.1). Leave empty for an unsigned test build.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}-${{ inputs.release_tag }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, sign and smoke-test
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # A release must never ship placeholder settings, so it fails here rather
+      # than producing an app that cannot sign in.
+      - name: Web bundle settings
+        shell: pwsh
+        env:
+          SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          GOOGLE_CLIENT_ID_WEB: ${{ secrets.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB }}
+        run: |
+          if ($env:RELEASE_TAG) {
+            foreach ($name in 'SUPABASE_URL', 'SUPABASE_ANON_KEY', 'GOOGLE_CLIENT_ID_WEB') {
+              if (-not (Get-Item "env:$name" -ErrorAction SilentlyContinue).Value) {
+                throw "Release build: the EXPO_PUBLIC_$name secret is not set."
+              }
+            }
+            "EXPO_PUBLIC_SUPABASE_URL=$env:SUPABASE_URL" >> $env:GITHUB_ENV
+            "EXPO_PUBLIC_SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY" >> $env:GITHUB_ENV
+            "EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB=$env:GOOGLE_CLIENT_ID_WEB" >> $env:GITHUB_ENV
+          } else {
+            'EXPO_PUBLIC_SUPABASE_URL=https://smoke-test.invalid' >> $env:GITHUB_ENV
+            'EXPO_PUBLIC_SUPABASE_ANON_KEY=smoke-test-placeholder' >> $env:GITHUB_ENV
+          }
+
+      - name: Export web bundle
+        run: npm run web
+
+      - name: Package (signed for releases)
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          SIGN_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          SIGN_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          SIGN_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          PUBLISHER: ${{ vars.WIN_PUBLISHER_NAME }}
+        run: |
+          $builderArgs = @('build', '--win', '--publish', 'never')
+          if ($env:RELEASE_TAG) {
+            foreach ($name in 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'SIGN_ENDPOINT', 'SIGN_ACCOUNT', 'SIGN_PROFILE', 'PUBLISHER') {
+              if (-not (Get-Item "env:$name" -ErrorAction SilentlyContinue).Value) {
+                throw "Release build: $name is not configured (see the header of this workflow)."
+              }
+            }
+            $builderArgs += @(
+              "--config.win.azureSignOptions.publisherName=$env:PUBLISHER",
+              "--config.win.azureSignOptions.endpoint=$env:SIGN_ENDPOINT",
+              "--config.win.azureSignOptions.codeSigningAccountName=$env:SIGN_ACCOUNT",
+              "--config.win.azureSignOptions.certificateProfileName=$env:SIGN_PROFILE"
+            )
+          }
+          npx electron-builder @builderArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem release -File | Format-Table Name, Length
+
+      - name: Verify signatures
+        if: inputs.release_tag != ''
+        shell: pwsh
+        env:
+          PUBLISHER: ${{ vars.WIN_PUBLISHER_NAME }}
+        run: |
+          $files = @(Get-ChildItem release\Sign2Site-Admin-Setup-*.exe) + @(Get-Item 'release\win-unpacked\Sign2Site Admin.exe')
+          foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature $file.FullName
+            Write-Host "$($file.Name): $($sig.Status) — $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { throw "$($file.Name) is not validly signed." }
+            if ($sig.SignerCertificate.Subject -notlike "*CN=$env:PUBLISHER*") { throw "$($file.Name) is signed by the wrong publisher." }
+          }
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release\Sign2Site-Admin-Setup-*.exe | Select-Object -First 1
+          $htmlTitle = ([regex]::Match((Get-Content dist\index.html -Raw), '<title>(.*?)</title>')).Groups[1].Value
+          pwsh -File build\windows-smoke-test.ps1 -Installer $installer.FullName -HtmlTitle $htmlTitle
+
+      - name: Keep the installer and screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ inputs.release_tag || github.sha }}
+          path: |
+            release/Sign2Site-Admin-Setup-*.exe
+            release/Sign2Site-Admin-Setup-*.exe.blockmap
+            release/latest.yml
+            smoke-screenshot.png
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Separate job so only release runs get a token that can write to the repo.
+  release:
+    name: Attach to the GitHub release
+    needs: build
+    if: inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-${{ inputs.release_tag }}
+          path: out
+      - name: Upload installer, blockmap and latest.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out/release
+          gh release upload "${{ inputs.release_tag }}" \
+            out/release/Sign2Site-Admin-Setup-*.exe \
+            out/release/Sign2Site-Admin-Setup-*.exe.blockmap \
+            out/release/latest.yml \
+            --repo "${{ github.repository }}" --clobber

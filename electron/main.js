@@ -61,6 +61,13 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient('sign2sign');
 }
 
+// Windows: notifications (the auto-updater's "update ready" toast) only show
+// when the process's AppUserModelID matches the one the NSIS installer stamps
+// on the Start Menu shortcut, which is the appId in electron-builder.yml.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.sign2sign.admin');
+}
+
 // ─── Window state ─────────────────────────────────────────────────────────────
 
 function loadWindowState() {
@@ -109,6 +116,12 @@ function saveWindowState(win) {
 let mainWindow = null;
 let pendingOAuthUrl = null; // buffered if open-url fires before window exists
 
+// Windows/Linux: if the protocol URL itself launched the app (no instance was
+// running), it arrives in this process's argv rather than via second-instance.
+if (process.platform !== 'darwin') {
+  pendingOAuthUrl = process.argv.find((arg) => arg.startsWith('sign2sign://')) || null;
+}
+
 function createWindow() {
   const state = loadWindowState();
 
@@ -119,7 +132,10 @@ function createWindow() {
     y: state.y,
     minWidth: 960,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
+    // macOS only. On Windows any non-default titleBarStyle makes the window
+    // frameless, with no close/minimise buttons and nothing to drag it by
+    // (Electron 44 native_window.cc: has_frame_ requires kNormal).
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
     backgroundColor: '#FFFFFF',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -474,9 +490,8 @@ app.whenReady().then(() => {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
-        { role: 'zoom' },
         ...(process.platform === 'darwin'
-          ? [{ type: 'separator' }, { role: 'front' }]
+          ? [{ role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
           : [{ role: 'close' }]),
       ],
     },
