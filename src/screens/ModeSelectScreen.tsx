@@ -13,7 +13,7 @@ export default function ModeSelectScreen() {
       {/* Full-bleed brand hero — brand rule: blue fills the block, white on top */}
       <View style={[styles.hero, { paddingTop: insets.top + 60 }]}>
         <Text style={styles.wordmark}>S2S</Text>
-        <Text style={styles.wordmarkSub}>SIGN2SIGN</Text>
+        <Text style={styles.wordmarkSub}>SIGN2SITE</Text>
         <Text style={styles.tagline}>Making every sign a landmark.</Text>
       </View>
 

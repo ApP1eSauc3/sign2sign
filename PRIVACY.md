@@ -1,6 +1,6 @@
 <!--
   Source of truth for the published policy (client's page:
-  https://sign2site.com.au/sign2sign-privacy/ once live). Rewritten 2026-10-11
+  https://sign2site.com.au/app-privacy/ once live). Rewritten 2026-10-11
   to describe the launch product, not the repo state. Every lifecycle claim
   names its mechanism here (CLAUDE.md doc rule 3); none of this comment is
   published.
@@ -21,30 +21,30 @@
   - Mac updates: electron-updater -> GitHub releases (electron-builder.yml publish)
 -->
 
-# Sign2Sign Privacy Policy
+# Sign2Site App Privacy Policy
 
 **Effective date:** 31 May 2026
 **Last updated:** 11 October 2026
 
-Sign2Sign is the job-management app used by Sign2Site and its installation crews to plan sign installations and removals and to record proof that each job was completed. It is available as an iPhone app and as a desktop app for Mac.
+The Sign2Site app is the job-management app used by Sign2Site and its installation crews to plan sign installations and removals and to record proof that each job was completed. It is available as an iPhone app and as a desktop app for Mac.
 
-This policy explains what information Sign2Sign collects, why we collect it, where it is kept, who else handles it on our behalf, how long we keep it, and the rights you have.
+This policy explains what information the app collects, why we collect it, where it is kept, who else handles it on our behalf, how long we keep it, and the rights you have.
 
-Sign2Sign is operated by **Sign2Site Pty Ltd** ("Sign2Site", "we", "us"). For any privacy question, contact **bryanna@sign2site.com.au**.
+The app is operated by **Sign2Site Pty Ltd** ("Sign2Site", "we", "us"). For any privacy question, contact **bryanna@sign2site.com.au**.
 
 ---
 
 ## 1. Who this policy covers
 
 - **Office staff ("admins").** They sign in with an email address and password to import jobs, plan routes, issue driver codes and review completed work.
-- **Drivers.** They work a route by entering a 6-digit code issued for that day. Drivers have no account, email address or password in Sign2Sign.
+- **Drivers.** They work a route by entering a 6-digit code issued for that day. Drivers have no account, email address or password in the app.
 - **Clients and agents named on a job.** They do not use the app, but a job record includes the site address and the agent's email address.
 
 ---
 
 ## 2. Information we collect
 
-We collect only what is needed to run jobs and keep the app secure. Sign2Sign contains no analytics, advertising or tracking tools, and we do not sell personal information or use it for advertising.
+We collect only what is needed to run jobs and keep the app secure. The app contains no analytics, advertising or tracking tools, and we do not sell personal information or use it for advertising.
 
 ### 2.1 Admins
 
@@ -102,9 +102,9 @@ Photos are kept in private storage and are never publicly accessible. When an au
 
 ## 5. Service providers
 
-We use the following providers to run Sign2Sign. Each handles only the information described here.
+We use the following providers to run the app. Each handles only the information described here.
 
-| Provider | What it does for Sign2Sign | Where | What it receives |
+| Provider | What it does for the app | Where | What it receives |
 |---|---|---|---|
 | Supabase Inc. | Database, file storage, sign-in and server functions | Amazon Web Services, Tokyo, Japan | All the admin, driver and job information described above |
 | Resend, Inc. | Sends password-reset and invitation emails | Amazon Web Services, Tokyo, Japan | The recipient's email address and the email's content |
@@ -116,7 +116,7 @@ We use the following providers to run Sign2Sign. Each handles only the informati
 
 ## 6. Where information is stored
 
-Sign2Sign's database, files, server functions and sign-in emails are hosted in **Tokyo, Japan**. This means information about Australian users is stored and processed outside Australia. Information is encrypted while it is being sent, and Supabase also encrypts it where it is stored.
+The app's database, files, server functions and sign-in emails are hosted in **Tokyo, Japan**. This means information about Australian users is stored and processed outside Australia. Information is encrypted while it is being sent, and Supabase also encrypts it where it is stored.
 
 ---
 
@@ -164,13 +164,13 @@ No system is completely secure. If you believe you have found a security problem
 
 ## 10. Children
 
-Sign2Sign is a workplace tool. It is not intended for anyone under 16, and we do not knowingly collect information from children.
+The app is a workplace tool. It is not intended for anyone under 16, and we do not knowingly collect information from children.
 
 ---
 
 ## 11. Changes to this policy
 
-If we make a significant change, we will update the "Last updated" date at the top. The current version is always available at the address shown on Sign2Sign's App Store page.
+If we make a significant change, we will update the "Last updated" date at the top. The current version is always available at the address shown on the app's App Store page.
 
 ---
 

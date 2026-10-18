@@ -127,7 +127,7 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
     },
-    title: 'Sign2Sign Admin',
+    title: 'Sign2Site Admin',
     show: false, // reveal only after content is ready to avoid flash
   });
 

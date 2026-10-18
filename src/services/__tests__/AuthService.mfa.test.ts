@@ -110,7 +110,7 @@ describe('startMfaEnrollment', () => {
     });
     const result = await AuthService.startMfaEnrollment();
     expect(auth.mfa.unenroll).toHaveBeenCalledWith({ factorId: 'f-stale' });
-    expect(auth.mfa.enroll).toHaveBeenCalledWith({ factorType: 'totp', friendlyName: 'Sign2Sign authenticator', issuer: 'Sign2Sign' });
+    expect(auth.mfa.enroll).toHaveBeenCalledWith({ factorType: 'totp', friendlyName: 'Sign2Site authenticator', issuer: 'Sign2Site' });
     expect(result).toEqual({ factorId: 'f-new', qrCode: '<svg/>', secret: 'SECRET', uri: 'otpauth://totp/x' });
   });
 

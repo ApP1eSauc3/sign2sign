@@ -63,7 +63,7 @@ export default function AdminLoginScreen({ navigation }: Props) {
       {/* Brand header — blue fills the block, white text on top */}
       <View style={[styles.header, { paddingTop: insets.top + 40 }]}>
         <Text style={styles.wordmark}>S2S</Text>
-        <Text style={styles.wordmarkSub}>SIGN2SIGN</Text>
+        <Text style={styles.wordmarkSub}>SIGN2SITE</Text>
       </View>
 
       {/* Form area */}

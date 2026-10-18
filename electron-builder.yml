@@ -1,6 +1,6 @@
 appId: com.sign2sign.admin
-productName: Sign2Sign Admin
-copyright: "Copyright © 2026 Sign2Sign"
+productName: Sign2Site Admin
+copyright: "Copyright © 2026 Sign2Site Pty Ltd"
 
 # Flip Electron Fuses after packaging, before signing (security checklist #19).
 # Implementation lives in build/ (not electron/) to keep the shell logic-free.
@@ -47,17 +47,17 @@ mac:
   # Signing also needs a "Developer ID Application" cert in your login Keychain.
   notarize: true
   # Force hyphenated DMG filenames. Without this, electron-builder writes the
-  # product name with a space ("Sign2Sign Admin-1.0.0.dmg"), GitHub Releases
-  # sanitizes the space to a dot in asset URLs ("Sign2Sign.Admin-1.0.0.dmg"),
+  # product name with a space ("Sign2Site Admin-1.0.0.dmg"), GitHub Releases
+  # sanitizes the space to a dot in asset URLs ("Sign2Site.Admin-1.0.0.dmg"),
   # but electron-updater's latest-mac.yml expects hyphens — three conventions,
   # no agreement, auto-updater 404s. Hyphenating from the start aligns all three.
-  artifactName: Sign2Sign-Admin-${version}-${arch}.${ext}
+  artifactName: Sign2Site-Admin-${version}-${arch}.${ext}
   target:
     - target: dmg
       arch: [x64, arm64]  # Intel + Apple Silicon
 
 dmg:
-  title: Sign2Sign Admin
+  title: Sign2Site Admin
   icon: assets/icon.png
   window:
     width: 540
@@ -75,7 +75,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Sign2Sign Admin
+  shortcutName: Sign2Site Admin
   # Custom NSIS script that registers the sign2sign:// protocol on Windows install
   # and removes it on uninstall. electron-builder's protocols key is macOS-only.
   include: electron/installer.nsh
@@ -89,7 +89,7 @@ nsis:
 # (via Info.plist CFBundleURLTypes). On Windows, NSIS must write the registry
 # entries — see electron/installer.nsh which is referenced by nsis.include below.
 protocols:
-  - name: Sign2Sign
+  - name: Sign2Site
     schemes:
       - sign2sign
 

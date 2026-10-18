@@ -43,10 +43,10 @@ export function noticeBody(job: SignJob): string {
     `Hi ${job.agentName || 'there'},\n\n` +
     `This is to confirm that the sign ${noun} at:\n\n` +
     `${job.address}\n\n` +
-    `has been completed by the Sign2Sign crew.\n\n` +
+    `has been completed by the Sign2Site crew.\n\n` +
     `Client: ${job.clientName}\n` +
     `Sign: ${job.signDescription}\n\n` +
-    `Regards,\nSign2Sign`
+    `Regards,\nSign2Site`
   );
 }
 

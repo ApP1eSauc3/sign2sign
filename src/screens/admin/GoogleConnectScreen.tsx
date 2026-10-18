@@ -98,7 +98,7 @@ export default function GoogleConnectScreen({ navigation }: Props) {
       <View style={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
         <Text style={styles.title}>Connect Google Account</Text>
         <Text style={styles.body}>
-          Sign2Sign imports jobs directly from Google Sheets. Connect your Google
+          Sign2Site imports jobs directly from Google Sheets. Connect your Google
           account once and your spreadsheets will be accessible for import.
         </Text>
 
@@ -106,7 +106,7 @@ export default function GoogleConnectScreen({ navigation }: Props) {
           <Text style={styles.scopeLabel}>PERMISSIONS REQUESTED</Text>
           <Text style={styles.scopeItem}>• Read-only access to Google Sheets</Text>
           <Text style={styles.scopeNote}>
-            Sign2Sign cannot modify your spreadsheets.
+            Sign2Site cannot modify your spreadsheets.
           </Text>
         </AdminCard>
 

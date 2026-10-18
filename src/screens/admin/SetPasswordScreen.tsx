@@ -143,7 +143,7 @@ export default function SetPasswordScreen({ route, navigation }: Props) {
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={[styles.header, { paddingTop: insets.top + 40 }]}>
         <Text style={styles.wordmark}>S2S</Text>
-        <Text style={styles.wordmarkSub}>SIGN2SIGN</Text>
+        <Text style={styles.wordmarkSub}>SIGN2SITE</Text>
       </View>
 
       <ScrollView

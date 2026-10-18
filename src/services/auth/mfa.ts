@@ -52,8 +52,8 @@ export async function startMfaEnrollment(): Promise<MfaEnrollment | AuthError> {
   }
   const { data, error } = await supabase.auth.mfa.enroll({
     factorType: 'totp',
-    friendlyName: 'Sign2Sign authenticator',
-    issuer: 'Sign2Sign',
+    friendlyName: 'Sign2Site authenticator',
+    issuer: 'Sign2Site',
   });
   if (error || !data) {
     console.warn('[auth] mfa enroll failed:', error?.message);
@@ -71,7 +71,7 @@ export async function confirmMfaEnrollment(factorId: string, code: string): Prom
   const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code: trimmed });
   if (error) {
     console.warn('[auth] mfa enroll verify failed:', error.message);
-    return { message: 'That code is not correct. Check the app shows "Sign2Sign" and try the current code.' };
+    return { message: 'That code is not correct. Check the app shows "Sign2Site" and try the current code.' };
   }
   return null;
 }

@@ -65,7 +65,7 @@ export default function MfaChallengeScreen({ navigation }: Props) {
       >
         <Text style={styles.title}>Two-step sign-in</Text>
         <Text style={styles.body}>
-          Open your authenticator app and enter the 6-digit code for Sign2Sign.
+          Open your authenticator app and enter the 6-digit code for Sign2Site.
         </Text>
 
         <TextInputField
@@ -104,7 +104,7 @@ export default function MfaChallengeScreen({ navigation }: Props) {
         <View style={styles.help}>
           <Text style={styles.helpText}>
             Lost your phone? Two-step sign-in can't be removed from inside the app. Ask whoever
-            manages Sign2Sign's Supabase project to remove your authenticator, then sign in with
+            manages Sign2Site's Supabase project to remove your authenticator, then sign in with
             your password and turn it on again.
           </Text>
         </View>

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "sign2sign",
+    "name": "Sign2Site",
     "slug": "sign2sign",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -126,7 +126,7 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Sign2Sign needs camera access to photograph completed sign installations and removals.",
+          "cameraPermission": "Sign2Site needs camera access to photograph completed sign installations and removals.",
           "photosPermission": false,
           "microphonePermission": false
         }
@@ -134,7 +134,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Sign2Sign attaches your current GPS coordinates to the photo you take so the office can confirm the sign was photographed at the correct address.",
+          "locationWhenInUsePermission": "Sign2Site attaches your current GPS coordinates to the photo you take so the office can confirm the sign was photographed at the correct address.",
           "locationAlwaysAndWhenInUsePermission": false,
           "locationAlwaysPermission": false,
           "isAndroidBackgroundLocationEnabled": false

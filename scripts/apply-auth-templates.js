@@ -25,13 +25,13 @@ const TEMPLATES = [
     file: 'recovery.html',
     contentField: 'mailer_templates_recovery_content',
     subjectField: 'mailer_subjects_recovery',
-    subject: 'Your Sign2Sign password reset code',
+    subject: 'Your Sign2Site password reset code',
   },
   {
     file: 'invite.html',
     contentField: 'mailer_templates_invite_content',
     subjectField: 'mailer_subjects_invite',
-    subject: 'You have been invited to Sign2Sign',
+    subject: 'You have been invited to the Sign2Site app',
   },
 ];
 

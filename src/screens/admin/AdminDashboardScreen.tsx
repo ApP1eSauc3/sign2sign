@@ -154,7 +154,7 @@ export default function AdminDashboardScreen({ navigation }: Props) {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Dashboard</Text>
-          <Text style={styles.headerSub}>SIGN2SIGN ADMIN</Text>
+          <Text style={styles.headerSub}>SIGN2SITE ADMIN</Text>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
