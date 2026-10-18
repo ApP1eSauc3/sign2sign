@@ -145,8 +145,10 @@ jobs:
         shell: pwsh
         run: |
           $installer = Get-ChildItem release\Sign2Site-Admin-Setup-*.exe | Select-Object -First 1
-          $htmlTitle = ([regex]::Match((Get-Content dist\index.html -Raw), '<title>(.*?)</title>')).Groups[1].Value
-          pwsh -File build\windows-smoke-test.ps1 -Installer $installer.FullName -HtmlTitle $htmlTitle
+          # The title the app sets (src/navigation/documentTitle.ts), read from source so the two cannot drift.
+          $expected = ([regex]::Match((Get-Content src\navigation\documentTitle.ts -Raw), "APP_TITLE = '([^']+)'")).Groups[1].Value
+          if (-not $expected) { throw 'Could not read APP_TITLE from src/navigation/documentTitle.ts' }
+          pwsh -File build\windows-smoke-test.ps1 -Installer $installer.FullName -ExpectedTitle $expected
 
       - name: Keep the installer and screenshot
         if: always()

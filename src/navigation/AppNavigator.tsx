@@ -9,6 +9,7 @@ import { colors } from '../utils/colors';
 import ModeSelectScreen from '../screens/ModeSelectScreen';
 import AdminStack from './AdminStack';
 import DriverStack from './DriverStack';
+import { formatDocumentTitle } from './documentTitle';
 
 export default function AppNavigator() {
   // Atomic selector: this component re-renders only when `mode` changes, which
@@ -66,7 +67,7 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer documentTitle={{ formatter: formatDocumentTitle }}>
       {mode === AppMode.Undecided && <ModeSelectScreen />}
       {/* One expression for both admin modes, so promoting Pending →
           Authenticated keeps the same AdminStack mounted instead of
